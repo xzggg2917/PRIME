@@ -1,0 +1,14 @@
+{
+  "name": "green-chemistry-assessor",
+  "version": "0.1.0",
+  "description": "Desktop app for quantitative and qualitative green chemistry assessment based on the 12 principles.",
+  "main": "src/main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^31.0.2"
+  }
+}

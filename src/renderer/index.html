@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Green Chemistry Assessor</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-bg"></div>
+    <main class="app-shell">
+      <header class="hero">
+        <div>
+          <p class="kicker">Desktop Evaluation Suite</p>
+          <h1>Green Chemistry 12-Principle Assessor</h1>
+          <p class="subtitle">
+            A rigorous framework for reproducible, weighted assessment of synthetic-route greenness under the 12 Principles of Green Chemistry.
+          </p>
+        </div>
+        <div class="score-card">
+          <p class="score-label">Total Score</p>
+          <p id="totalScore" class="score-value">0.00 / 1.00</p>
+          <p id="lastSaved" class="score-note">Not saved yet</p>
+          <p id="currentFile" class="score-note">Current file: None</p>
+        </div>
+      </header>
+
+      <section class="panel-grid">
+        <section class="panel form-panel">
+          <div class="panel-head">
+            <div class="panel-head-row">
+              <h2>Assessment Form</h2>
+              <button id="openRouteSafetyBtn" type="button" class="btn btn-primary">Route Safety Prediction</button>
+            </div>
+            <p>Define score and notes for every green chemistry principle.</p>
+          </div>
+
+          <form id="assessmentForm" class="principles-list"></form>
+
+          <div class="actions">
+            <button id="newFileBtn" type="button" class="btn btn-secondary">New File</button>
+            <button id="saveBtn" type="button" class="btn btn-primary">Save As</button>
+            <button id="openBtn" type="button" class="btn btn-secondary">Open File</button>
+            <button id="exportBtn" type="button" class="btn btn-secondary">Export Report (PDF)</button>
+            <button id="resetBtn" type="button" class="btn btn-secondary">Reset</button>
+          </div>
+        </section>
+
+        <section class="panel chart-panel">
+          <div class="panel-head">
+            <h2 id="chartSectionTitle">Radar Profile</h2>
+            <p id="chartSectionSubtitle">Visual comparison of all 12 principles across the radar axes.</p>
+          </div>
+          <div class="visual-grid">
+            <div id="visualCard" class="visual-card">
+              <div class="visual-toolbar">
+                <h3 class="visual-title">Visualization</h3>
+                <div class="view-switch" role="tablist" aria-label="Visualization switch">
+                  <button id="viewRadarBtn" class="view-btn active" type="button" role="tab" aria-selected="true">Radar</button>
+                  <button id="viewGaugeBtn" class="view-btn" type="button" role="tab" aria-selected="false">Flower</button>
+                  <button id="viewFlowerBtn" class="view-btn" type="button" role="tab" aria-selected="false">Weighted Ring</button>
+                </div>
+              </div>
+
+              <section id="radarPane" class="visual-pane active" aria-label="Radar chart view">
+                <div class="chart-wrap radar-wrap">
+                  <canvas id="radarCanvas" width="540" height="540" aria-label="Radar chart"></canvas>
+                </div>
+              </section>
+
+              <section id="gaugePane" class="visual-pane" aria-label="Flower chart view">
+                <div class="chart-wrap gauge-wrap">
+                  <canvas id="gaugeCanvas" width="640" height="460" aria-label="Green score gauge"></canvas>
+                </div>
+              </section>
+
+              <section id="flowerPane" class="visual-pane" aria-label="Weighted ring chart view">
+                <div class="chart-wrap flower-wrap">
+                  <canvas id="flowerCanvas" width="640" height="500" aria-label="Weighted 12-petal flower chart"></canvas>
+                </div>
+              </section>
+
+              <div id="vizLockOverlay" class="viz-lock-overlay" aria-live="polite"></div>
+              
+              <p class="view-note">Use the buttons to switch between detailed visualizations.</p>
+            </div>
+          </div>
+          <div id="statusBar" class="status-bar">Ready</div>
+        </section>
+      </section>
+
+      <section class="panel text-viz-bottom-panel" aria-label="Text visualization of principle scores">
+        <div class="panel-head text-viz-bottom-head">
+          <h2>Text Visualization</h2>
+          <p id="textVizBottomTotal">Total 0.00 / 1.00</p>
+        </div>
+        <div id="textVizBottomList" class="text-viz-bottom-list"></div>
+      </section>
+
+      <section class="analysis-grid" aria-label="Comparison and recommendation">
+        <section class="panel analysis-panel" aria-label="Multi-file radar comparison">
+          <div class="panel-head">
+            <h2>Comparison Radar</h2>
+            <p>Overlay current route with multiple saved assessment files for profile comparison.</p>
+          </div>
+          <p class="policy-note">
+            Comparison policy: only routes under the same weight profile can be compared and used for intelligent recommendation/evaluation. Cross-weight comparison can produce pseudo-green conclusions.
+          </p>
+          <div class="analysis-actions">
+            <button id="compareOpenBtn" type="button" class="btn btn-secondary">Add Comparison Files</button>
+            <button id="compareClearBtn" type="button" class="btn btn-secondary">Clear Comparison</button>
+          </div>
+          <p id="comparePolicyState" class="policy-state">No comparison file loaded.</p>
+          <div class="compare-canvas-wrap">
+            <canvas id="compareRadarCanvas" width="860" height="460" aria-label="Radar overlay comparison"></canvas>
+          </div>
+          <div id="compareLegend" class="compare-legend"></div>
+          <section id="compareRejectedPanel" class="compare-rejected-panel" aria-label="Rejected comparison files">
+            <h3 class="model-subtitle">Rejected Files (Weight Mismatch)</h3>
+            <div id="compareRejectedList" class="model-list"></div>
+          </section>
+        </section>
+
+        <section class="panel analysis-panel" aria-label="Recommendation and evaluation model">
+          <div class="panel-head">
+            <h2>Recommendation Model</h2>
+            <p>Rule-based route evaluation with weighted priorities and actionable improvements.</p>
+          </div>
+          <div class="model-grade-row">
+            <div>
+              <p class="model-kicker">Model Grade</p>
+              <p id="modelGrade" class="model-grade-value">C</p>
+            </div>
+            <div>
+              <p class="model-kicker">Confidence</p>
+              <p id="modelConfidence" class="model-grade-meta">0.00</p>
+            </div>
+          </div>
+          <p id="modelSummary" class="model-summary">Awaiting input.</p>
+          <div class="model-columns">
+            <div>
+              <h3 class="model-subtitle">Comprehensive Dual-Route Evaluation</h3>
+              <div id="modelPriorityList" class="model-list"></div>
+            </div>
+            <div>
+              <h3 class="model-subtitle">Optimized Route Plan Recommendation</h3>
+              <div id="modelStrengthList" class="model-list"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section id="routeSafetyPage" class="route-safety-page hidden" aria-label="Route safety prediction workspace">
+        <div class="route-safety-header">
+          <div>
+            <h2>Route Safety Prediction</h2>
+            <p>Enter reactants and process conditions to run a route-level comprehensive safety hazard assessment.</p>
+          </div>
+          <button id="closeRouteSafetyBtn" type="button" class="btn btn-secondary">Back to Main Assessment</button>
+        </div>
+
+        <section class="panel safety-panel" aria-label="Laboratory safety precheck">
+          <h3 class="model-subtitle">Safety Precheck (Route Hazard Screening)</h3>
+          <p class="safety-subtitle">Enter hazard and operation context to get a fast route-level safety risk estimate.</p>
+          <div class="reactant-table-wrap" aria-label="Route reactant table">
+            <table class="reactant-table">
+              <thead>
+                <tr>
+                  <th>Reactant (name / CAS / InChIKey)</th>
+                  <th title="Eq means equivalent ratio relative to the limiting reagent. Example: limiting reagent = 1.00 eq, another reagent = 0.50 eq.">Eq (equivalent ratio)</th>
+                  <th>Amount (g)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="safetyReactantTableBody"></tbody>
+            </table>
+          </div>
+          <div class="safety-lookup-row">
+            <label class="safety-field safety-lookup-field">
+              <span>Reaction scale</span>
+              <select id="safetyScaleLevel">
+                <option value="lab" selected>Lab</option>
+                <option value="pilot">Pilot</option>
+                <option value="plant">Plant</option>
+              </select>
+            </label>
+            <div class="safety-inline-actions">
+              <button id="safetyAddReactantRowBtn" type="button" class="btn btn-secondary">+ Add Reactant Row</button>
+              <button id="safetyRouteAnalyzeBtn" type="button" class="btn btn-primary">Analyze Route Risk</button>
+            </div>
+          </div>
+          <p id="safetyLookupStatus" class="safety-lookup-status">No route analysis yet.</p>
+          <div class="safety-grid">
+            <label class="safety-field">
+              <span>Danger-class substances</span>
+              <input id="safetyDangerCount" type="number" min="0" step="1" placeholder="e.g. 2" />
+            </label>
+            <label class="safety-field">
+              <span>Warning-class substances</span>
+              <input id="safetyWarningCount" type="number" min="0" step="1" placeholder="e.g. 4" />
+            </label>
+            <label class="safety-field">
+              <span>Maximum reaction temperature (C)</span>
+              <input id="safetyMaxTemp" type="number" step="0.1" placeholder="e.g. 85" />
+            </label>
+            <label class="safety-field">
+              <span>Maximum pressure (bar)</span>
+              <input id="safetyMaxPressure" type="number" step="0.1" min="0" placeholder="e.g. 6" />
+            </label>
+            <label class="safety-field">
+              <span>Runaway potential</span>
+              <select id="safetyRunawayRisk">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Engineering control level</span>
+              <select id="safetyControlLevel">
+                <option value="advanced">Advanced</option>
+                <option value="standard" selected>Standard</option>
+                <option value="basic">Basic</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Monitoring coverage</span>
+              <select id="safetyMonitoringLevel">
+                <option value="inline">In-line / Continuous</option>
+                <option value="batch" selected>At-line / Periodic</option>
+                <option value="none">None / Fixed-time</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>PPE dependence</span>
+              <select id="safetyPpeDependence">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Exotherm intensity</span>
+              <select id="safetyExothermLevel">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Hazardous gas release potential</span>
+              <select id="safetyGasReleaseLevel">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <div class="safety-grid">
+            <label class="safety-field">
+              <span>Stage: charging risk</span>
+              <select id="safetyStageCharge">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Stage: reaction risk</span>
+              <select id="safetyStageReaction">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Stage: quench risk</span>
+              <select id="safetyStageQuench">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="safety-field">
+              <span>Stage: isolation risk</span>
+              <select id="safetyStageIsolation">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+          <div class="safety-toggle-row">
+            <label><input id="safetyHasCmr" type="checkbox" /> CMR hazard present</label>
+            <label><input id="safetyHasFlammable" type="checkbox" /> High flammability present</label>
+          </div>
+          <label class="safety-field">
+            <span>Critical safety note (optional)</span>
+            <textarea id="safetyNotes" rows="2" placeholder="e.g. toxic gas release risk during quench stage"></textarea>
+          </label>
+          <div>
+            <h3 class="model-subtitle">Analyzed Reactant Evidence</h3>
+            <div id="safetyEvidenceList" class="model-list"></div>
+          </div>
+          <div>
+            <h3 class="model-subtitle">Stage Risk Heatmap</h3>
+            <div id="safetyStageHeatmap" class="model-list stage-heatmap-grid"></div>
+          </div>
+          <section class="score-guide-card" aria-label="Scoring guide">
+            <h3 class="model-subtitle">Scoring Guide</h3>
+            <div class="score-guide-grid">
+              <article class="score-guide-item">
+                <p class="score-guide-title">Safety Score</p>
+                <p class="score-guide-body">The score starts from a high baseline and is reduced by risk signals from chemicals, operating conditions, safeguards, stage risks, and scale-up impact. Higher score means lower overall route risk.</p>
+              </article>
+              <article class="score-guide-item">
+                <p class="score-guide-title">Risk Grade Thresholds</p>
+                <p class="score-guide-body">The final score is translated into four levels: Low, Moderate, High, and Critical, so users can quickly interpret route risk severity.</p>
+              </article>
+              <article class="score-guide-item">
+                <p class="score-guide-title">Confidence</p>
+                <p class="score-guide-body">Confidence reflects how complete your input data is. More complete process and hazard information leads to higher confidence in the screening result.</p>
+              </article>
+              <article class="score-guide-item">
+                <p class="score-guide-title">Risk Driver Breakdown</p>
+                <p class="score-guide-body">Each bar represents how strongly one risk factor contributes to score reduction. Longer bars indicate stronger risk-driving factors that should be prioritized for control.</p>
+              </article>
+              <article class="score-guide-item">
+                <p class="score-guide-title">Stage Risk Radar Mapping</p>
+                <p class="score-guide-body">The radar chart compares risk intensity across Charging, Reaction, Quench, and Isolation stages, helping identify where stage-specific safeguards should be strengthened first.</p>
+              </article>
+            </div>
+          </section>
+          <div class="safety-viz-grid" aria-label="Safety visualization charts">
+            <article class="safety-chart-card">
+              <h3 class="model-subtitle">Risk Driver Breakdown</h3>
+              <canvas id="safetyDriverChart" class="safety-chart-canvas" width="760" height="280"></canvas>
+            </article>
+            <article class="safety-chart-card safety-radar-card">
+              <h3 class="model-subtitle">Stage Risk Radar</h3>
+              <canvas id="safetyStageRadar" class="safety-chart-canvas safety-radar-canvas" width="760" height="300"></canvas>
+            </article>
+          </div>
+
+          <div class="safety-result-grid">
+            <article class="model-item compact">
+              <p class="model-item-title">Risk Grade</p>
+              <p id="safetyRiskGrade" class="model-item-body">Moderate</p>
+            </article>
+            <article class="model-item compact">
+              <p class="model-item-title">Safety Score</p>
+              <p id="safetyRiskScore" class="model-item-body">0.00</p>
+            </article>
+            <article class="model-item compact">
+              <p class="model-item-title">Confidence</p>
+              <p id="safetyConfidence" class="model-item-body">0.00</p>
+            </article>
+          </div>
+          <div class="model-columns">
+            <div>
+              <h3 class="model-subtitle">Suggested Mitigations (linked to driver chart)</h3>
+              <div id="safetyActions" class="model-list"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./chart.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
