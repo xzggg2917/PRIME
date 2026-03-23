@@ -14,6 +14,119 @@
     return value;
   }
 
+  function getScoreTier(score) {
+    const v = clamp01(score);
+    if (v > 0.8) {
+      return 0;
+    }
+    if (v > 0.6) {
+      return 1;
+    }
+    if (v > 0.3) {
+      return 2;
+    }
+    if (v > 0.1) {
+      return 3;
+    }
+    return 4;
+  }
+
+  function hexToRgb(hex) {
+    if (typeof hex !== 'string') {
+      return { r: 0, g: 0, b: 0 };
+    }
+    const normalized = hex.length === 4
+      ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
+      : hex;
+    const value = normalized.replace('#', '');
+    return {
+      r: parseInt(value.slice(0, 2), 16) || 0,
+      g: parseInt(value.slice(2, 4), 16) || 0,
+      b: parseInt(value.slice(4, 6), 16) || 0
+    };
+  }
+
+  function rgbToHex(r, g, b) {
+    const toHex = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+  }
+
+  function mixHex(fromHex, toHex, t) {
+    const p = Math.max(0, Math.min(1, Number(t) || 0));
+    const a = hexToRgb(fromHex);
+    const b = hexToRgb(toHex);
+    return rgbToHex(
+      a.r + (b.r - a.r) * p,
+      a.g + (b.g - a.g) * p,
+      a.b + (b.b - a.b) * p
+    );
+  }
+
+  function rgbaFromHex(hex, alpha) {
+    const c = hexToRgb(hex);
+    return `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
+  }
+
+  function getTierProgress(score) {
+    const v = clamp01(score);
+    if (v > 0.8) {
+      return (v - 0.8) / 0.2;
+    }
+    if (v > 0.6) {
+      return (v - 0.6) / 0.2;
+    }
+    if (v > 0.3) {
+      return (v - 0.3) / 0.3;
+    }
+    if (v > 0.1) {
+      return (v - 0.1) / 0.2;
+    }
+    return v / 0.1;
+  }
+
+  function getScoreVisual(score) {
+    const palette = [
+      {
+        label: 'Outstanding',
+        low: '#2cbf68',
+        high: '#167a41'
+      },
+      {
+        label: 'Excellent',
+        low: '#7fc85b',
+        high: '#4f9f34'
+      },
+      {
+        label: 'Good',
+        low: '#e0c25a',
+        high: '#b38f2f'
+      },
+      {
+        label: 'Poor',
+        low: '#ee9648',
+        high: '#c46615'
+      },
+      {
+        label: 'Very Poor',
+        low: '#d45145',
+        high: '#99251d'
+      }
+    ];
+    const tier = palette[getScoreTier(score)];
+    const t = getTierProgress(score);
+    const solid = mixHex(tier.low, tier.high, t);
+    const strong = mixHex(solid, '#111111', 0.22);
+    const edgeBase = mixHex(solid, '#ffffff', 0.75);
+    return {
+      label: tier.label,
+      solid,
+      soft: rgbaFromHex(solid, 0.22),
+      strong,
+      glow: rgbaFromHex(solid, 0.46),
+      edge: rgbaFromHex(edgeBase, 0.78)
+    };
+  }
+
   function ensureTooltipEl() {
     let tooltip = document.getElementById('chartHoverTooltip');
     if (tooltip) {
@@ -157,7 +270,7 @@
     state.regions = regions;
   }
 
-  function drawRadarChart(canvas, labels, values) {
+  function drawRadarChart(canvas, labels, values, normalizedScore) {
     if (!canvas) {
       return;
     }
@@ -168,6 +281,12 @@
     const centerX = width / 2;
     const centerY = height / 2;
     const maxRadius = Math.min(width, height) * 0.36;
+    const safeValues = Array.isArray(values) ? values : [];
+    const meanScore = safeValues.length > 0
+      ? safeValues.reduce((sum, v) => sum + clamp01(v), 0) / safeValues.length
+      : 0;
+    const radarScore = Number.isFinite(Number(normalizedScore)) ? clamp01(Number(normalizedScore)) : meanScore;
+    const radarVisual = getScoreVisual(radarScore);
 
     ctx.clearRect(0, 0, width, height);
     const hoverRegions = [];
@@ -213,9 +332,9 @@
     });
 
     ctx.beginPath();
-    values.forEach((value, i) => {
+    safeValues.forEach((value, i) => {
       const radius = maxRadius * value;
-      const angle = (Math.PI * 2 * i) / values.length - Math.PI / 2;
+      const angle = (Math.PI * 2 * i) / safeValues.length - Math.PI / 2;
       const x = centerX + radius * Math.cos(angle);
       const y = centerY + radius * Math.sin(angle);
       if (i === 0) {
@@ -225,20 +344,20 @@
       }
     });
     ctx.closePath();
-    ctx.fillStyle = 'rgba(15, 118, 110, 0.28)';
-    ctx.strokeStyle = 'rgba(15, 118, 110, 0.95)';
+    ctx.fillStyle = radarVisual.soft;
+    ctx.strokeStyle = radarVisual.strong;
     ctx.lineWidth = 2.2;
     ctx.fill();
     ctx.stroke();
 
-    values.forEach((value, i) => {
+    safeValues.forEach((value, i) => {
       const radius = maxRadius * value;
-      const angle = (Math.PI * 2 * i) / values.length - Math.PI / 2;
+      const angle = (Math.PI * 2 * i) / safeValues.length - Math.PI / 2;
       const x = centerX + radius * Math.cos(angle);
       const y = centerY + radius * Math.sin(angle);
       ctx.beginPath();
       ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#0b4b46';
+      ctx.fillStyle = radarVisual.strong;
       ctx.fill();
 
       hoverRegions.push({
@@ -289,17 +408,16 @@
     const hoverRegions = [];
 
     function drawFruitBadge(x, y, size, value, index, rotation) {
-      const v = clamp01(value);
-      const hue = 2 + 118 * v;
-      const petalColor = `hsl(${hue}, 74%, 54%)`;
-      const petalEdge = 'rgba(230, 255, 221, 0.64)';
-      const coreColor = `hsl(${hue}, 70%, 36%)`;
+      const colorSet = getScoreVisual(value);
+      const petalColor = colorSet.solid;
+      const petalEdge = colorSet.edge;
+      const coreColor = colorSet.strong;
 
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rotation);
 
-      ctx.shadowColor = `hsla(${hue}, 95%, 65%, 0.50)`;
+      ctx.shadowColor = colorSet.glow;
       ctx.shadowBlur = 14;
 
       // Petal ring.
@@ -315,7 +433,7 @@
         ctx.ellipse(0, 0, size * 0.48, size * 0.34, 0, 0, Math.PI * 2);
         ctx.fillStyle = petalColor;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(230, 255, 221, 0.64)';
+        ctx.strokeStyle = petalEdge;
         ctx.lineWidth = 1.4;
         ctx.stroke();
         ctx.restore();
@@ -419,18 +537,8 @@
     });
 
     // Qualitative assessment text above numeric score.
-    let assessmentText = 'Poor';
-    if (score >= 0.85) {
-      assessmentText = 'Excellent';
-    } else if (score >= 0.7) {
-      assessmentText = 'Very Good';
-    } else if (score >= 0.55) {
-      assessmentText = 'Good';
-    } else if (score >= 0.4) {
-      assessmentText = 'Fair';
-    } else if (score >= 0.25) {
-      assessmentText = 'Needs Improvement';
-    }
+    const overallVisual = getScoreVisual(score);
+    const assessmentText = overallVisual.label;
 
     ctx.fillStyle = 'rgba(236, 247, 240, 0.95)';
     ctx.font = '700 20px "Segoe UI", sans-serif';
@@ -439,9 +547,8 @@
     ctx.fillText(assessmentText, centerX, centerY + 96);
 
     // Score text on trunk.
-    const scoreHue = 2 + 118 * score;
-    ctx.fillStyle = `hsl(${scoreHue}, 84%, 64%)`;
-    ctx.shadowColor = `hsla(${scoreHue}, 90%, 62%, 0.45)`;
+    ctx.fillStyle = overallVisual.solid;
+    ctx.shadowColor = overallVisual.glow;
     ctx.shadowBlur = 10;
     ctx.font = '700 44px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
@@ -514,7 +621,7 @@
       const a0 = cursor;
       const a1 = cursor + span;
       const mid = (a0 + a1) * 0.5;
-      const hue = 2 + 118 * v;
+      const colorSet = getScoreVisual(v);
 
       // Drop shadow for subtle 3D depth.
       drawDonutSlice(centerX, centerY + 3, outerR, innerR, a0, a1);
@@ -527,8 +634,8 @@
       const gx1 = centerX + outerR * Math.cos(mid);
       const gy1 = centerY + outerR * Math.sin(mid);
       const segGrad = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
-      segGrad.addColorStop(0, `hsl(${hue}, 62%, 72%)`);
-      segGrad.addColorStop(1, `hsl(${hue}, 78%, 52%)`);
+      segGrad.addColorStop(0, colorSet.soft);
+      segGrad.addColorStop(1, colorSet.solid);
 
       drawDonutSlice(centerX, centerY, outerR, innerR, a0, a1);
       ctx.fillStyle = segGrad;
@@ -585,8 +692,8 @@
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    const scoreHue = 2 + 118 * score;
-    ctx.fillStyle = `hsl(${scoreHue}, 78%, 46%)`;
+    const scoreVisual = getScoreVisual(score);
+    ctx.fillStyle = scoreVisual.strong;
     ctx.font = '700 28px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

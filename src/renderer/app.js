@@ -1000,8 +1000,11 @@ function renderBottomTextVisualization(total) {
 
   state.items.forEach((item) => {
     const score = clampScore(item.score);
+    const visual = getScaleVisual(score);
     const card = document.createElement('article');
     card.className = 'text-viz-bottom-item';
+    card.style.borderColor = visual.border;
+    card.style.background = visual.soft;
 
     const row = document.createElement('div');
     row.className = 'text-viz-bottom-row';
@@ -1023,6 +1026,7 @@ function renderBottomTextVisualization(total) {
     const fill = document.createElement('div');
     fill.className = 'text-viz-bottom-fill';
     fill.style.width = `${(score * 100).toFixed(1)}%`;
+    fill.style.background = visual.solid;
 
     bar.appendChild(fill);
     card.appendChild(row);
@@ -1763,11 +1767,7 @@ function drawSafetyDriverChart(canvas, contributions, activeLabel = '') {
     ctx.fillRect(barX, barY, maxBarWidth, barHeight);
 
     const ratio = points / maxValue;
-    const barColor = ratio > 0.75
-      ? 'rgba(191, 54, 36, 0.82)'
-      : ratio > 0.45
-        ? 'rgba(210, 125, 22, 0.82)'
-        : 'rgba(39, 138, 103, 0.82)';
+    const barColor = getScaleVisual(1 - ratio).solid;
     ctx.fillStyle = barColor;
     ctx.fillRect(barX, barY, barWidth, barHeight);
 
@@ -1917,8 +1917,11 @@ function drawSafetyStageRadar(canvas, stageBreakdown) {
   });
 
   ctx.beginPath();
+  let stageSafetyTotal = 0;
   stages.forEach((item, index) => {
     const value = safetyLevelToValue(item.level);
+    const stageSafety = clampUnit(1 - value);
+    stageSafetyTotal += stageSafety;
     const radius = maxRadius * value;
     const angle = (Math.PI * 2 * index) / stages.length + angleOffset;
     const x = centerX + radius * stretchX * Math.cos(angle);
@@ -1930,8 +1933,10 @@ function drawSafetyStageRadar(canvas, stageBreakdown) {
     }
   });
   ctx.closePath();
-  ctx.fillStyle = 'rgba(191, 54, 36, 0.24)';
-  ctx.strokeStyle = 'rgba(176, 44, 27, 0.9)';
+  const avgStageSafety = stages.length > 0 ? stageSafetyTotal / stages.length : 0;
+  const stageVisual = getScaleVisual(avgStageSafety);
+  ctx.fillStyle = stageVisual.soft;
+  ctx.strokeStyle = stageVisual.strong;
   ctx.lineWidth = 2.2;
   ctx.fill();
   ctx.stroke();
@@ -1943,8 +1948,11 @@ function renderSafetyPrecheck() {
   }
 
   const result = evaluateSafetyScreening(state.safetyScreening);
+  const riskVisual = getScaleVisual(result.score01);
   safetyRiskGradeEl.textContent = result.level;
+  safetyRiskGradeEl.style.color = riskVisual.strong;
   safetyRiskScoreEl.textContent = `${result.score100.toFixed(1)} / 100`;
+  safetyRiskScoreEl.style.color = riskVisual.solid;
   safetyConfidenceEl.textContent = result.confidence.toFixed(2);
 
   safetyActionsEl.innerHTML = '';
@@ -2315,8 +2323,11 @@ function renderRecommendationModel(total, weightSummary, comparisonInfo = { comp
   }
 
   const grade = getModelGrade(total);
+  const gradeVisual = getScaleVisual(total);
   const confidence = weightSummary.totalValid && weightSummary.minValid ? 1 : 0.72;
   modelGradeEl.textContent = grade;
+  modelGradeEl.style.color = gradeVisual.strong;
+  modelGradeEl.title = `${gradeVisual.label} (${total.toFixed(2)})`;
   modelConfidenceEl.textContent = confidence.toFixed(2);
 
   const current = comparisonInfo.currentSnapshot || buildCurrentSnapshot();
@@ -2415,6 +2426,116 @@ function clampScore(rawValue) {
     return 1;
   }
   return value;
+}
+
+function getScaleTier(score) {
+  const v = clampScore(score);
+  if (v > 0.8) {
+    return 0;
+  }
+  if (v > 0.6) {
+    return 1;
+  }
+  if (v > 0.3) {
+    return 2;
+  }
+  if (v > 0.1) {
+    return 3;
+  }
+  return 4;
+}
+
+function hexToRgbLocal(hex) {
+  if (typeof hex !== 'string') {
+    return { r: 0, g: 0, b: 0 };
+  }
+  const normalized = hex.length === 4
+    ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`
+    : hex;
+  const value = normalized.replace('#', '');
+  return {
+    r: parseInt(value.slice(0, 2), 16) || 0,
+    g: parseInt(value.slice(2, 4), 16) || 0,
+    b: parseInt(value.slice(4, 6), 16) || 0
+  };
+}
+
+function rgbToHexLocal(r, g, b) {
+  const toHex = (v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+function mixHexLocal(fromHex, toHex, t) {
+  const p = Math.max(0, Math.min(1, Number(t) || 0));
+  const a = hexToRgbLocal(fromHex);
+  const b = hexToRgbLocal(toHex);
+  return rgbToHexLocal(
+    a.r + (b.r - a.r) * p,
+    a.g + (b.g - a.g) * p,
+    a.b + (b.b - a.b) * p
+  );
+}
+
+function rgbaFromHexLocal(hex, alpha) {
+  const c = hexToRgbLocal(hex);
+  return `rgba(${c.r}, ${c.g}, ${c.b}, ${alpha})`;
+}
+
+function getScaleTierProgress(score) {
+  const v = clampScore(score);
+  if (v > 0.8) {
+    return (v - 0.8) / 0.2;
+  }
+  if (v > 0.6) {
+    return (v - 0.6) / 0.2;
+  }
+  if (v > 0.3) {
+    return (v - 0.3) / 0.3;
+  }
+  if (v > 0.1) {
+    return (v - 0.1) / 0.2;
+  }
+  return v / 0.1;
+}
+
+function getScaleVisual(score) {
+  const palette = [
+    {
+      label: 'Outstanding',
+      low: '#2cbf68',
+      high: '#167a41'
+    },
+    {
+      label: 'Excellent',
+      low: '#7fc85b',
+      high: '#4f9f34'
+    },
+    {
+      label: 'Good',
+      low: '#e0c25a',
+      high: '#b38f2f'
+    },
+    {
+      label: 'Poor',
+      low: '#ee9648',
+      high: '#c46615'
+    },
+    {
+      label: 'Very Poor',
+      low: '#d45145',
+      high: '#99251d'
+    }
+  ];
+  const tier = palette[getScaleTier(score)];
+  const t = getScaleTierProgress(score);
+  const solid = mixHexLocal(tier.low, tier.high, t);
+  return {
+    label: tier.label,
+    solid,
+    soft: rgbaFromHexLocal(solid, 0.18),
+    border: rgbaFromHexLocal(solid, 0.40),
+    strong: mixHexLocal(solid, '#111111', 0.2)
+  };
 }
 
 function createHelpTip(text) {
@@ -4020,7 +4141,10 @@ async function runRouteReactantRiskAnalysis() {
 
 function refreshSummary() {
   const total = getWeightedTotalScore();
+  const totalVisual = getScaleVisual(total);
   totalScoreEl.textContent = `${total.toFixed(2)} / 1.00`;
+  totalScoreEl.style.color = totalVisual.solid;
+  totalScoreEl.title = totalVisual.label;
   renderBottomTextVisualization(total);
   const safetyResult = renderSafetyPrecheck();
 
@@ -4036,7 +4160,7 @@ function refreshSummary() {
 
   const labels = state.items.map((item) => item.short);
   const values = state.items.map((item) => item.score);
-  window.radarChart.draw(radarCanvas, labels, values);
+  window.radarChart.draw(radarCanvas, labels, values, total);
   window.gaugeChart.draw(gaugeCanvas, total, total, values, state.principleWeights);
   window.flowerChart.draw(flowerCanvas, values, state.principleWeights, total, total);
 }
