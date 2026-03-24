@@ -20,27 +20,6 @@ plt.rcParams["figure.facecolor"] = "white"
 plt.rcParams["axes.facecolor"] = "white"
 plt.rcParams["savefig.facecolor"] = "white"
 plt.rcParams["savefig.edgecolor"] = "white"
-
-
-def score_tier(value: float) -> int:
-    v = float(np.clip(value, 0, 1))
-    if v > 0.8:
-        return 0
-    if v > 0.6:
-        return 1
-    if v > 0.3:
-        return 2
-    if v > 0.1:
-        return 3
-    return 4
-
-
-def tier_color(value: float) -> str:
-    # 5-bin discrete palette: best -> worst (green -> red).
-    palette = ["#1f9d55", "#65b84a", "#d4b140", "#e67e22", "#c0392b"]
-    return palette[score_tier(value)]
-
-
 @dataclass
 class QuestionSpec:
     code: str
@@ -95,7 +74,7 @@ def draw_bar(ax, spec: QuestionSpec) -> None:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
         return
 
-    colors = [tier_color(v) for v in vals]
+    colors = plt.cm.RdYlGn(np.clip(vals, 0, 1))
     x = np.arange(len(cats))
     bars = ax.bar(x, vals, width=0.28, color=colors, edgecolor="white", linewidth=0.8)
 
@@ -120,25 +99,25 @@ def draw_curve(ax, spec: QuestionSpec) -> None:
     x0, x1 = (spec.x_range or [0, 1])
 
     if spec.curve_id == "p1_pmi":
-        x = np.linspace(max(1.0, x0), max(1.1, x1), 3000)
+        x = np.linspace(max(1.0, x0), max(1.1, x1), 300)
         # Strictly follow: Score = max(0, 1 - log10(PMI)/3)
         y = np.maximum(0.0, 1.0 - (np.log10(x) / 3.0))
         ax.set_xlim(1, 1000)
         ax.set_xticks([1, 200, 400, 600, 800, 1000])
     elif spec.curve_id == "p2_ae":
-        x = np.linspace(max(0.0, x0), min(1.0, x1), 1500)
+        x = np.linspace(max(0.0, x0), min(1.0, x1), 200)
         # Score = clamp(MW_product / sum(MW_reactants), 0, 1)
         y = np.clip(x, 0, 1)
     else:
-        x = np.linspace(x0, x1, 1200)
+        x = np.linspace(x0, x1, 150)
         y = 1 - np.power((x - x0) / max(1e-9, (x1 - x0)), 0.6)
         y = np.clip(y, 0, 1)
 
-    # Render each tiny line segment with its own tier color so threshold boundaries are strict.
-    for i in range(len(x) - 1):
-        y_mid = (y[i] + y[i + 1]) * 0.5
-        color = tier_color(float(y_mid))
-        ax.plot(x[i:i + 2], y[i:i + 2], color=color, linewidth=1.8)
+    seg = 20
+    for i in range(seg):
+        start = int(i * len(x) / seg)
+        end = int((i + 1) * len(x) / seg)
+        ax.plot(x[start:end], y[start:end], color=plt.cm.RdYlGn(y[start]), linewidth=1.8)
 
 
 def draw_question(ax, spec: QuestionSpec) -> None:

@@ -11,6 +11,8 @@ const {
 
 const HAZARD_CACHE_FILE_NAME = 'hazard-cache.json';
 const HAZARD_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const APP_USER_MODEL_ID = 'com.prime.assessor';
+const APP_ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.ico');
 
 function normalizeHazardQuery(input) {
   return String(input || '').trim().toLowerCase();
@@ -155,6 +157,7 @@ function createMainWindow() {
     minWidth: 1080,
     minHeight: 720,
     backgroundColor: '#f5f1e8',
+    icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -519,6 +522,7 @@ ipcMain.handle('hazard:lookup', async (_, payload) => {
 });
 
 app.whenReady().then(() => {
+  app.setAppUserModelId(APP_USER_MODEL_ID);
   createMainWindow();
 
   app.on('activate', () => {

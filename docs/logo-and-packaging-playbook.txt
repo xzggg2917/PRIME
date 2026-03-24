@@ -1,0 +1,36 @@
+PRIME logo and packaging playbook (Windows)
+
+1) Logo design baseline
+- Brand direction: reliable, scientific, safety-first.
+- Keep a single dominant symbol (shield OR molecule OR leaf).
+- Build vector master at 1024x1024 first (SVG/AI/Figma).
+
+2) Small-size legibility
+- Validate at 16x16 and 32x32 first.
+- Remove fine details and thin strokes.
+- Keep strong silhouette contrast.
+
+3) Export set
+- Master: SVG
+- App icon source: ICO (16/24/32/48/64/128/256)
+- Optional marketing previews: PNG 512/1024
+
+4) Project placement
+- File path must be: assets/icons/icon.ico
+
+5) Package commands
+- npm install
+- npm run pack:win   (unpacked app folder)
+- npm run dist:win   (installer via NSIS)
+
+6) Pre-release checks
+- Desktop shortcut icon
+- Taskbar icon
+- Start menu icon
+- Installer icon
+- 100%/125%/150% display scaling
+
+7) Common pitfalls
+- ICO only contains 256 size: blurry at small sizes.
+- Too many details: unreadable at 16x16.
+- No alpha channel: ugly background box.

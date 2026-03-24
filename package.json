@@ -1,14 +1,44 @@
 {
   "name": "green-chemistry-assessor",
   "version": "0.1.0",
+  "productName": "PRIME",
   "description": "Desktop app for quantitative and qualitative green chemistry assessment based on the 12 principles.",
   "main": "src/main.js",
   "author": "",
   "license": "MIT",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack:win": "electron-builder --dir --win",
+    "dist:win": "electron-builder --win"
   },
   "devDependencies": {
-    "electron": "^31.0.2"
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.prime.assessor",
+    "productName": "PRIME",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "LICENSE",
+      "README.md"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "PRIME"
+    }
   }
 }
