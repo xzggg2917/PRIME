@@ -664,6 +664,8 @@ const modelConfidenceEl = document.getElementById('modelConfidence');
 const modelSummaryEl = document.getElementById('modelSummary');
 const modelPriorityListEl = document.getElementById('modelPriorityList');
 const modelStrengthListEl = document.getElementById('modelStrengthList');
+const modelGradeHelpHostEl = document.getElementById('modelGradeHelpHost');
+const modelSafetyHelpHostEl = document.getElementById('modelSafetyHelpHost');
 const openRouteSafetyBtnEl = document.getElementById('openRouteSafetyBtn');
 const closeRouteSafetyBtnEl = document.getElementById('closeRouteSafetyBtn');
 const routeSafetyPageEl = document.getElementById('routeSafetyPage');
@@ -798,6 +800,15 @@ const VIEW_META = {
 };
 
 const COMPARISON_COLORS = ['#0e7c86', '#df5d3f', '#2563eb', '#7c3aed', '#059669', '#dc2626', '#9333ea', '#b45309'];
+
+function getComparisonSeriesColor(index) {
+  if (index < COMPARISON_COLORS.length) {
+    return COMPARISON_COLORS[index];
+  }
+  // Golden-angle hue stepping gives distinct colors when comparing many files.
+  const hue = (index * 137.508) % 360;
+  return `hsl(${hue.toFixed(1)}, 68%, 42%)`;
+}
 
 const PRINCIPLE_RECOMMENDATION_LIBRARY = {
   p1: 'Optimize stoichiometry and isolate yield-critical losses to reduce PMI and raise prevention score.',
@@ -1161,7 +1172,8 @@ function drawComparisonRadar() {
   }
 
   datasets.forEach((dataset, index) => {
-    const color = COMPARISON_COLORS[index % COMPARISON_COLORS.length];
+    const lineColor = getComparisonSeriesColor(index);
+    const scoreVisual = getScaleVisual(dataset.total);
     ctx.beginPath();
     for (let i = 0; i < PRINCIPLES.length; i += 1) {
       const value = clampScore(dataset.values[i]);
@@ -1174,23 +1186,27 @@ function drawComparisonRadar() {
       }
     }
     ctx.closePath();
-    ctx.fillStyle = toRgba(color, index === 0 ? 0.2 : 0.14);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = index === 0 ? 2.4 : 1.8;
+    ctx.fillStyle = toRgba(scoreVisual.solid, index === 0 ? 0.28 : 0.18);
+    ctx.strokeStyle = lineColor;
+    ctx.lineWidth = index === 0 ? 2.6 : 2;
     ctx.fill();
     ctx.stroke();
   });
 
   compareLegendEl.innerHTML = '';
   datasets.forEach((dataset, index) => {
-    const color = COMPARISON_COLORS[index % COMPARISON_COLORS.length];
+    const lineColor = getComparisonSeriesColor(index);
     const item = document.createElement('div');
     item.className = 'compare-legend-item';
     item.title = dataset.filePath || dataset.name;
 
     const dot = document.createElement('span');
     dot.className = 'compare-legend-color';
-    dot.style.background = color;
+    dot.style.background = lineColor;
+    dot.style.width = '16px';
+    dot.style.height = '4px';
+    dot.style.borderRadius = '2px';
+    dot.style.border = '1px solid rgba(0, 0, 0, 0.22)';
 
     const text = document.createElement('span');
     text.textContent = `${dataset.name} | total ${dataset.total.toFixed(2)} / 1.00`;
@@ -1220,19 +1236,20 @@ function drawComparisonRadar() {
 }
 
 function getModelGrade(total) {
-  if (total >= 0.85) {
-    return 'A';
+  const v = clampScore(total);
+  if (v > 0.8) {
+    return 'Excellent';
   }
-  if (total >= 0.72) {
-    return 'B';
+  if (v > 0.6) {
+    return 'Great';
   }
-  if (total >= 0.58) {
-    return 'C';
+  if (v > 0.3) {
+    return 'Good';
   }
-  if (total >= 0.42) {
-    return 'D';
+  if (v > 0.1) {
+    return 'Poor';
   }
-  return 'E';
+  return 'Bad';
 }
 
 function createModelCard(title, body) {
@@ -2501,12 +2518,12 @@ function getScaleTierProgress(score) {
 function getScaleVisual(score) {
   const palette = [
     {
-      label: 'Outstanding',
+      label: 'Excellent',
       low: '#2cbf68',
       high: '#167a41'
     },
     {
-      label: 'Excellent',
+      label: 'Great',
       low: '#7fc85b',
       high: '#4f9f34'
     },
@@ -2521,7 +2538,7 @@ function getScaleVisual(score) {
       high: '#c46615'
     },
     {
-      label: 'Very Poor',
+      label: 'Bad',
       low: '#d45145',
       high: '#99251d'
     }
@@ -2551,6 +2568,20 @@ function createHelpTip(text) {
   tip.appendChild(popup);
 
   return tip;
+}
+
+function attachRecommendationHelpTips() {
+  if (modelGradeHelpHostEl && modelGradeHelpHostEl.childElementCount === 0) {
+    modelGradeHelpHostEl.appendChild(createHelpTip(
+      'Five-band thresholds (weighted total score): (0.8,1.0] = Excellent, (0.6,0.8] = Great, (0.3,0.6] = Good, (0.1,0.3] = Poor, [0,0.1] = Bad.'
+    ));
+  }
+
+  if (modelSafetyHelpHostEl && modelSafetyHelpHostEl.childElementCount === 0) {
+    modelSafetyHelpHostEl.appendChild(createHelpTip(
+      'Safety precheck score = clamp(100 - total deductions, 0..100). Deductions come from danger/warning counts, CMR, flammability, runaway risk, temperature, pressure, controls, monitoring, PPE dependence, exotherm/gas release, stage risks, and scale. Confidence = 0.55 + 0.45 * completeness ratio, where completeness ratio = (number of filled safety evidence fields) / (total required safety evidence fields), clamped to 0..1.'
+    ));
+  }
 }
 
 function renderForm() {
@@ -3955,17 +3986,14 @@ function createSafetyHelpDot(text) {
 function attachSafetyFieldHelpTips() {
   const fieldTips = {
     safetyScaleLevel: 'Defines consequence scaling. Plant scale applies stronger penalty than pilot or lab scale.',
-    safetyDangerCount: 'Auto-filled from route analysis, but can be manually corrected based on verified hazard classification.',
     safetyWarningCount: 'Auto-filled warning-level hazard count. Adjust manually if your validated inventory differs.',
     safetyMaxTemp: 'Highest expected reaction temperature under normal or upset operation.',
     safetyMaxPressure: 'Highest expected pressure during the route, including transient peaks.',
     safetyRunawayRisk: 'Expert judgment of thermal runaway tendency under process disturbances.',
-    safetyControlLevel: 'Engineering protection maturity. Advanced means stronger independent safeguards.',
     safetyMonitoringLevel: 'How continuously critical variables are monitored (inline is strongest).',
     safetyPpeDependence: 'How much risk control depends on PPE rather than intrinsic/engineering controls.',
     safetyExothermLevel: 'Relative heat-release intensity of the route.',
     safetyGasReleaseLevel: 'Potential for hazardous gas release during reaction or handling.',
-    safetyStageCharge: 'Risk level during charging and transfer operations.',
     safetyStageReaction: 'Risk level during the reaction stage itself.',
     safetyStageQuench: 'Risk level during quench and neutralization operations.',
     safetyStageIsolation: 'Risk level during isolation, filtration, and separation steps.',
@@ -4665,6 +4693,7 @@ viewGaugeBtnEl.addEventListener('click', () => setVisualizationView('gauge'));
 viewFlowerBtnEl.addEventListener('click', () => setVisualizationView('flower'));
 
 renderForm();
+attachRecommendationHelpTips();
 attachSafetyFieldHelpTips();
 bindSafetyInputs();
 refreshSummary();

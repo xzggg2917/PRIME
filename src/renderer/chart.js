@@ -87,12 +87,12 @@
   function getScoreVisual(score) {
     const palette = [
       {
-        label: 'Outstanding',
+        label: 'Excellent',
         low: '#2cbf68',
         high: '#167a41'
       },
       {
-        label: 'Excellent',
+        label: 'Great',
         low: '#7fc85b',
         high: '#4f9f34'
       },
@@ -107,7 +107,7 @@
         high: '#c46615'
       },
       {
-        label: 'Very Poor',
+        label: 'Bad',
         low: '#d45145',
         high: '#99251d'
       }

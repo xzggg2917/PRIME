@@ -238,6 +238,12 @@ h1 {
   font-weight: 700;
 }
 
+.inline-help-host {
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .model-grade-value {
   margin: 4px 0 0;
   font-size: 2rem;
