@@ -703,6 +703,7 @@ const safetyStageRadarEl = document.getElementById('safetyStageRadar');
 let activeView = 'radar';
 let autoSaveTimer = null;
 let autoSaveInFlight = false;
+let manualSaveInFlight = false;
 let safetyDriverChartRegions = [];
 let safetyDriverChartRows = [];
 let safetyDriverChartActiveLabel = '';
@@ -754,6 +755,34 @@ function buildAssessmentPayload() {
     principleWeights: state.principleWeights,
     safetyScreening: state.safetyScreening
   };
+}
+
+function toCanvasDataUrl(canvas) {
+  if (!canvas || typeof canvas.toDataURL !== 'function') {
+    return '';
+  }
+  try {
+    return canvas.toDataURL('image/png');
+  } catch (_) {
+    return '';
+  }
+}
+
+function buildReportExportPayload() {
+  const payload = buildAssessmentPayload();
+  payload.visuals = {
+    radar: toCanvasDataUrl(radarCanvas),
+    flowerProfile: toCanvasDataUrl(gaugeCanvas),
+    weightedRing: toCanvasDataUrl(flowerCanvas),
+    comparisonRadar: toCanvasDataUrl(compareRadarCanvasEl),
+    safetyDriver: toCanvasDataUrl(safetyDriverChartEl),
+    safetyStageRadar: toCanvasDataUrl(safetyStageRadarEl)
+  };
+  payload.reportContext = {
+    currentFileName: getBaseName(state.currentFilePath) || 'Unsaved Draft',
+    comparisonCount: Array.isArray(state.comparisonSnapshots) ? state.comparisonSnapshots.length : 0
+  };
+  return payload;
 }
 
 function buildEmptyAssessmentPayload() {
@@ -4295,7 +4324,7 @@ function resetAll() {
 }
 
 async function runAutoSave() {
-  if (!state.autoSaveEnabled || !state.currentFilePath || autoSaveInFlight) {
+  if (!state.autoSaveEnabled || !state.currentFilePath || autoSaveInFlight || manualSaveInFlight) {
     return;
   }
   if (!window.desktopAPI || typeof window.desktopAPI.autoSaveAssessment !== 'function') {
@@ -4319,7 +4348,7 @@ async function runAutoSave() {
 }
 
 function scheduleAutoSave() {
-  if (!state.autoSaveEnabled || !state.currentFilePath) {
+  if (!state.autoSaveEnabled || !state.currentFilePath || manualSaveInFlight) {
     return;
   }
   if (autoSaveTimer) {
@@ -4334,9 +4363,21 @@ function scheduleAutoSave() {
 async function saveAssessment() {
   setStatus('Saving assessment...');
 
+  // Avoid writing to an old path while Save As dialog is open.
+  manualSaveInFlight = true;
+  if (autoSaveTimer) {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+
   const payload = buildAssessmentPayload();
 
-  const result = await window.desktopAPI.saveAssessment(payload);
+  let result = null;
+  try {
+    result = await window.desktopAPI.saveAssessment(payload);
+  } finally {
+    manualSaveInFlight = false;
+  }
 
   if (result && result.canceled) {
     setStatus('Save canceled. Current assessment remains unchanged.');
@@ -4544,31 +4585,26 @@ async function openAssessmentFile() {
 }
 
 async function createNewAssessmentFile() {
-  if (!window.desktopAPI || typeof window.desktopAPI.createAssessmentFile !== 'function') {
-    setStatus('New file API is unavailable in this build.');
-    return;
-  }
+  setStatus('Creating new assessment draft...');
 
-  setStatus('Creating new assessment file...');
-  const result = await window.desktopAPI.createAssessmentFile(buildEmptyAssessmentPayload());
+  state.items = state.items.map((item) => ({
+    ...item,
+    score: 0,
+    note: '',
+    details: getDefaultDetailsById(item.id)
+  }));
+  state.principleWeights = getDefaultFlowerWeights();
+  state.safetyScreening = getDefaultSafetyScreening();
+  state.comparisonSnapshots = [];
+  state.rejectedComparisonEntries = [];
 
-  if (!result) {
-    setStatus('New file creation failed.');
-    return;
-  }
+  syncSafetyInputsFromState();
+  renderForm();
+  refreshSummary();
 
-  if (result.canceled) {
-    setStatus('New file creation canceled.');
-    return;
-  }
-
-  if (result.error) {
-    setStatus(`New file creation failed: ${result.message}`);
-    return;
-  }
-
-  applyLoadedAssessmentResult(result);
-  setStatus('New assessment file created and opened.');
+  setCurrentFilePath(null);
+  lastSavedEl.textContent = 'Not saved yet';
+  setStatus('New draft ready. Use Save As to choose the only save file.');
 }
 
 async function openComparisonFiles() {
@@ -4644,7 +4680,7 @@ function clearComparisonFiles() {
 async function exportReportPdf() {
   setStatus('Exporting PDF report...');
 
-  const payload = buildAssessmentPayload();
+  const payload = buildReportExportPayload();
 
   const result = await window.desktopAPI.exportReportPdf(payload);
   if (!result) {

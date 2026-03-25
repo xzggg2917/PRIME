@@ -334,11 +334,37 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function buildVisualCard(title, dataUrl, description) {
+  const safeTitle = escapeHtml(title || 'Chart');
+  const safeDescription = description ? `<p class="chart-caption">${escapeHtml(description)}</p>` : '';
+  const canRender = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/');
+
+  if (!canRender) {
+    return `
+      <section class="chart-card">
+        <h3>${safeTitle}</h3>
+        <div class="chart-missing">Chart snapshot unavailable in current view.</div>
+        ${safeDescription}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="chart-card">
+      <h3>${safeTitle}</h3>
+      <img src="${dataUrl}" alt="${safeTitle}" />
+      ${safeDescription}
+    </section>
+  `;
+}
+
 function buildReportHtml(payload) {
   const generatedAt = new Date().toLocaleString();
   const total = Number(payload?.total || 0).toFixed(2);
   const principles = Array.isArray(payload?.principles) ? payload.principles : [];
   const weights = Array.isArray(payload?.principleWeights) ? payload.principleWeights : [];
+  const visuals = payload?.visuals && typeof payload.visuals === 'object' ? payload.visuals : {};
+  const reportContext = payload?.reportContext && typeof payload.reportContext === 'object' ? payload.reportContext : {};
 
   const rows = principles.map((item, index) => {
     const score = Number(item?.score || 0);
@@ -353,6 +379,15 @@ function buildReportHtml(payload) {
     `;
   }).join('');
 
+  const visualCards = [
+    buildVisualCard('12-Principle Radar', visuals.radar, 'Radar profile for all 12 principles.'),
+    buildVisualCard('Flower Profile', visuals.flowerProfile, 'Flower-style overview of weighted performance.'),
+    buildVisualCard('Weighted Ring', visuals.weightedRing, 'Ring composition of weighted principle scores.'),
+    buildVisualCard('Comparison Radar', visuals.comparisonRadar, 'Overlay comparison between current route and loaded comparison files.'),
+    buildVisualCard('Safety Driver Contribution', visuals.safetyDriver, 'Top safety risk drivers by score deduction points.'),
+    buildVisualCard('Safety Stage Radar', visuals.safetyStageRadar, 'Charging, reaction, quench, and isolation stage safety profile.')
+  ].join('');
+
   return `<!doctype html>
 <html>
 <head>
@@ -361,17 +396,27 @@ function buildReportHtml(payload) {
   <style>
     body { font-family: "Segoe UI", Arial, sans-serif; margin: 28px; color: #1c2d2b; }
     h1 { margin: 0 0 8px; font-size: 28px; }
+    h2 { margin: 0 0 10px; font-size: 20px; }
+    h3 { margin: 0 0 8px; font-size: 15px; }
     .meta { color: #4b6460; margin-bottom: 16px; font-size: 13px; }
     .total { margin: 10px 0 16px; padding: 10px 12px; border-radius: 8px; background: #edf7f4; font-weight: 700; }
+    .context { margin-bottom: 16px; color: #2b4a45; font-size: 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { border: 1px solid #cedad7; padding: 8px 10px; text-align: left; }
     th { background: #e3f1ed; }
     tr:nth-child(even) td { background: #f8fcfb; }
+    .chart-grid { display: block; margin-top: 20px; }
+    .chart-card { border: 1px solid #cedad7; border-radius: 10px; padding: 12px; margin-bottom: 14px; break-inside: avoid; }
+    .chart-card img { width: 100%; height: auto; border: 1px solid #dbe8e5; border-radius: 8px; background: #ffffff; }
+    .chart-caption { margin: 8px 0 0; font-size: 12px; color: #4d6561; }
+    .chart-missing { font-size: 12px; color: #7a8f8b; padding: 10px; border-radius: 8px; background: #f4f8f7; border: 1px dashed #c7d6d3; }
+    .page-break { break-before: page; page-break-before: always; }
   </style>
 </head>
 <body>
   <h1>Green Chemistry 12-Principle Assessment Report</h1>
   <div class="meta">Generated: ${escapeHtml(generatedAt)}</div>
+  <div class="context">Source file: ${escapeHtml(reportContext.currentFileName || 'Unknown')} | Comparison files loaded: ${Number(reportContext.comparisonCount || 0)}</div>
   <div class="total">Total Score: ${total} / 12.00</div>
   <table>
     <thead>
@@ -384,12 +429,19 @@ function buildReportHtml(payload) {
     </thead>
     <tbody>${rows}</tbody>
   </table>
+
+  <div class="page-break"></div>
+  <h2>Visualization Appendix</h2>
+  <div class="chart-grid">
+    ${visualCards}
+  </div>
 </body>
 </html>`;
 }
 
 ipcMain.handle('report:export-pdf', async (_, payload) => {
   let reportWindow;
+  let tempHtmlPath = null;
   try {
     const suggestedName = `green-chemistry-report-${new Date().toISOString().slice(0, 10)}.pdf`;
     const saveResult = await dialog.showSaveDialog({
@@ -419,7 +471,11 @@ ipcMain.handle('report:export-pdf', async (_, payload) => {
     });
 
     const html = buildReportHtml(payload || {});
-    await reportWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    const tempDir = app.getPath('temp');
+    tempHtmlPath = path.join(tempDir, `prime-report-${Date.now()}-${Math.random().toString(36).slice(2)}.html`);
+    await fs.writeFile(tempHtmlPath, html, 'utf-8');
+
+    await reportWindow.loadFile(tempHtmlPath);
     const pdfData = await reportWindow.webContents.printToPDF({
       printBackground: true,
       pageSize: 'A4',
@@ -442,6 +498,13 @@ ipcMain.handle('report:export-pdf', async (_, payload) => {
       message: error.message
     };
   } finally {
+    if (tempHtmlPath) {
+      try {
+        await fs.unlink(tempHtmlPath);
+      } catch (_) {
+        // Ignore temp cleanup errors.
+      }
+    }
     if (reportWindow && !reportWindow.isDestroyed()) {
       reportWindow.destroy();
     }
