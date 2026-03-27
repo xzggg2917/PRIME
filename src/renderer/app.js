@@ -373,100 +373,99 @@ function getP2DefaultDetails() {
 
 function getP3DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP5DefaultDetails() {
   return {
-    selectedOption: 'C',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP4DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP6DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP7DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP8DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP9DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP10DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP11DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getP12DefaultDetails() {
   return {
-    selectedOption: 'B',
-    score: 0.6
+    selectedOption: '',
+    score: 0
   };
 }
 
 function getDefaultSafetyScreening() {
   return {
-    reactantRows: [
-      { id: `row-${Date.now()}`, query: '', eq: '1.00', amountG: '' }
-    ],
+    reactantRows: [],
     routeEvidence: [],
-    scaleLevel: 'lab',
+    scaleLevel: '',
     dangerCount: '',
     warningCount: '',
     hasCmr: false,
     hasFlammable: false,
-    runawayRisk: 'medium',
+    runawayRisk: '',
     maxTempC: '',
     maxPressureBar: '',
-    controlLevel: 'standard',
-    monitoringLevel: 'batch',
-    ppeDependence: 'medium',
-    exothermLevel: 'medium',
-    gasReleaseLevel: 'medium',
+    controlLevel: '',
+    monitoringLevel: '',
+    ppeDependence: '',
+    exothermLevel: '',
+    gasReleaseLevel: '',
     stageRisks: {
-      charge: 'medium',
-      reaction: 'medium',
-      quench: 'medium',
-      isolation: 'medium'
+      charge: '',
+      reaction: '',
+      quench: '',
+      isolation: ''
     },
-    notes: ''
+    notes: '',
+    analysisCompletedAt: ''
   };
 }
 
@@ -991,6 +990,13 @@ function getWeightedTotalScore() {
   return weighted;
 }
 
+function markRouteSafetyAnalysisStale() {
+  if (!state.safetyScreening) {
+    return;
+  }
+  state.safetyScreening.analysisCompletedAt = '';
+}
+
 function isLegacyPristineMinWeightTemplate(savedPrinciples, loadedWeights) {
   if (!Array.isArray(savedPrinciples) || !Array.isArray(loadedWeights)) {
     return false;
@@ -1320,7 +1326,7 @@ function evaluateSafetyScreening(input) {
   const draft = input || getDefaultSafetyScreening();
   const stageRisks = draft && draft.stageRisks && typeof draft.stageRisks === 'object'
     ? draft.stageRisks
-    : { charge: 'medium', reaction: 'medium', quench: 'medium', isolation: 'medium' };
+    : { charge: '', reaction: '', quench: '', isolation: '' };
   const evidenceList = Array.isArray(draft.routeEvidence) ? draft.routeEvidence : [];
   const evidenceDangerCount = evidenceList.reduce((sum, item) => sum + toSafeNonNegativeNumber(item && item.dangerCount), 0);
   const evidenceWarningCount = evidenceList.reduce((sum, item) => sum + toSafeNonNegativeNumber(item && item.warningCount), 0);
@@ -1406,8 +1412,10 @@ function evaluateSafetyScreening(input) {
     high: 12
   };
   ['charge', 'reaction', 'quench', 'isolation'].forEach((stage) => {
-    const level = stageRisks[stage] || 'medium';
-    addDeduction(`Stage risk: ${stage}`, stagePenalty[level] || 6);
+    const level = stageRisks[stage] || '';
+    if (level === 'low' || level === 'medium' || level === 'high') {
+      addDeduction(`Stage risk: ${stage}`, stagePenalty[level]);
+    }
   });
 
   if (draft.scaleLevel === 'plant') {
@@ -1442,7 +1450,7 @@ function evaluateSafetyScreening(input) {
     Boolean(draft.scaleLevel)
   ];
   const filledCount = completenessFlags.filter(Boolean).length;
-  const confidence = clampUnit(0.55 + 0.45 * (filledCount / completenessFlags.length));
+  const confidence = clampUnit(filledCount / completenessFlags.length);
 
   const driverContributions = [...deductions]
     .sort((a, b) => b.points - a.points)
@@ -1609,15 +1617,18 @@ function evaluateSafetyScreening(input) {
     actions,
     evidenceCount: evidenceList.length,
     stageBreakdown: [
-      { stage: 'Charging', level: stageRisks.charge || 'medium' },
-      { stage: 'Reaction', level: stageRisks.reaction || 'medium' },
-      { stage: 'Quench', level: stageRisks.quench || 'medium' },
-      { stage: 'Isolation', level: stageRisks.isolation || 'medium' }
+      { stage: 'Charging', level: stageRisks.charge || 'unrated' },
+      { stage: 'Reaction', level: stageRisks.reaction || 'unrated' },
+      { stage: 'Quench', level: stageRisks.quench || 'unrated' },
+      { stage: 'Isolation', level: stageRisks.isolation || 'unrated' }
     ]
   };
 }
 
 function safetyLevelToValue(level) {
+  if (level === 'unrated' || !level) {
+    return 0;
+  }
   if (level === 'low') {
     return 0.3;
   }
@@ -2038,13 +2049,13 @@ function renderSafetyPrecheck() {
     } else {
       stages.forEach((item) => {
         const chip = document.createElement('article');
-        chip.className = `stage-chip ${item.level || 'medium'}`;
+        chip.className = `stage-chip ${item.level || 'unrated'}`;
         const title = document.createElement('p');
         title.className = 'model-item-title';
         title.textContent = item.stage;
         const body = document.createElement('p');
         body.className = 'model-item-body';
-        body.textContent = `Risk level: ${(item.level || 'medium').toUpperCase()}`;
+        body.textContent = `Risk level: ${(item.level || 'unrated').toUpperCase()}`;
         chip.appendChild(title);
         chip.appendChild(body);
         safetyStageHeatmapEl.appendChild(chip);
@@ -2370,7 +2381,8 @@ function renderRecommendationModel(total, weightSummary, comparisonInfo = { comp
 
   const grade = getModelGrade(total);
   const gradeVisual = getScaleVisual(total);
-  const confidence = weightSummary.totalValid && weightSummary.minValid ? 1 : 0.72;
+  const confidence = safetyResult ? clampUnit(safetyResult.confidence) : 0;
+  const weightProfileState = weightSummary.totalValid && weightSummary.minValid ? 'valid' : 'invalid';
   modelGradeEl.textContent = grade;
   modelGradeEl.style.color = gradeVisual.strong;
   modelGradeEl.title = `${gradeVisual.label} (${total.toFixed(2)})`;
@@ -2407,7 +2419,7 @@ function renderRecommendationModel(total, weightSummary, comparisonInfo = { comp
   const safetyNote = safetyResult
     ? ` Safety precheck: ${safetyResult.level} risk (${safetyResult.score100.toFixed(1)} / 100, confidence ${safetyResult.confidence.toFixed(2)}), analyzed reactants ${Number(safetyResult.evidenceCount || 0)}.`
     : '';
-  const baseSummary = `Generation mode: local deterministic engine. Current route grade is ${grade}, current total ${total.toFixed(2)} / 1.00, and compatible route count is ${structuredAnalysis.routeCount - 1}.${mismatchNote}${safetyNote}`;
+  const baseSummary = `Generation mode: local deterministic engine. Current route grade is ${grade}, current total ${total.toFixed(2)} / 1.00, compatible route count is ${structuredAnalysis.routeCount - 1}, and weight profile is ${weightProfileState}.${mismatchNote}${safetyNote}`;
   renderModelNarrativeCards(baseSummary, generatedReport);
 }
 
@@ -2608,7 +2620,7 @@ function attachRecommendationHelpTips() {
 
   if (modelSafetyHelpHostEl && modelSafetyHelpHostEl.childElementCount === 0) {
     modelSafetyHelpHostEl.appendChild(createHelpTip(
-      'Safety precheck score = clamp(100 - total deductions, 0..100). Deductions come from danger/warning counts, CMR, flammability, runaway risk, temperature, pressure, controls, monitoring, PPE dependence, exotherm/gas release, stage risks, and scale. Confidence = 0.55 + 0.45 * completeness ratio, where completeness ratio = (number of filled safety evidence fields) / (total required safety evidence fields), clamped to 0..1.'
+      'Route Safety Prediction is an independent module for route-level hazard screening. Final total score is the weighted principle total only. Safety precheck score = clamp(100 - total deductions, 0..100). Deductions come from danger/warning counts, CMR, flammability, runaway risk, temperature, pressure, controls, monitoring, PPE dependence, exotherm/gas release, stage risks, and scale. Confidence = completeness ratio = (number of filled safety evidence fields) / (total required safety evidence fields), clamped to 0..1.'
     ));
   }
 }
@@ -3802,8 +3814,8 @@ function syncSafetyInputsFromState() {
     return;
   }
   const model = state.safetyScreening || getDefaultSafetyScreening();
-  if (!Array.isArray(model.reactantRows) || model.reactantRows.length === 0) {
-    model.reactantRows = [{ id: `row-${Date.now()}`, query: '', eq: '1.00', amountG: '' }];
+  if (!Array.isArray(model.reactantRows)) {
+    model.reactantRows = [];
   }
   state.safetyScreening.reactantRows = model.reactantRows;
 
@@ -3820,6 +3832,8 @@ function syncSafetyInputsFromState() {
       queryInput.value = row.query || '';
       queryInput.addEventListener('input', () => {
         state.safetyScreening.reactantRows[index].query = queryInput.value;
+        markRouteSafetyAnalysisStale();
+        refreshSummary();
       });
       tdQuery.appendChild(queryInput);
 
@@ -3832,6 +3846,8 @@ function syncSafetyInputsFromState() {
       eqInput.value = row.eq || '1.00';
       eqInput.addEventListener('input', () => {
         state.safetyScreening.reactantRows[index].eq = eqInput.value;
+        markRouteSafetyAnalysisStale();
+        refreshSummary();
       });
       tdEq.appendChild(eqInput);
 
@@ -3845,6 +3861,8 @@ function syncSafetyInputsFromState() {
       amountInput.placeholder = 'g';
       amountInput.addEventListener('input', () => {
         state.safetyScreening.reactantRows[index].amountG = amountInput.value;
+        markRouteSafetyAnalysisStale();
+        refreshSummary();
       });
       tdAmount.appendChild(amountInput);
 
@@ -3853,10 +3871,12 @@ function syncSafetyInputsFromState() {
       removeBtn.type = 'button';
       removeBtn.className = 'reactant-row-remove';
       removeBtn.textContent = 'Remove';
-      removeBtn.disabled = model.reactantRows.length <= 1;
+      removeBtn.disabled = model.reactantRows.length <= 0;
       removeBtn.addEventListener('click', () => {
         state.safetyScreening.reactantRows.splice(index, 1);
+        markRouteSafetyAnalysisStale();
         syncSafetyInputsFromState();
+        refreshSummary();
       });
       tdAction.appendChild(removeBtn);
 
@@ -3869,35 +3889,35 @@ function syncSafetyInputsFromState() {
   }
 
   if (safetyScaleLevelEl) {
-    safetyScaleLevelEl.value = model.scaleLevel || 'lab';
+    safetyScaleLevelEl.value = model.scaleLevel || '';
   }
   safetyDangerCountEl.value = model.dangerCount;
   safetyWarningCountEl.value = model.warningCount;
   safetyHasCmrEl.checked = Boolean(model.hasCmr);
   safetyHasFlammableEl.checked = Boolean(model.hasFlammable);
-  safetyRunawayRiskEl.value = model.runawayRisk || 'medium';
+  safetyRunawayRiskEl.value = model.runawayRisk || '';
   safetyMaxTempEl.value = model.maxTempC;
   safetyMaxPressureEl.value = model.maxPressureBar;
-  safetyControlLevelEl.value = model.controlLevel || 'standard';
-  safetyMonitoringLevelEl.value = model.monitoringLevel || 'batch';
-  safetyPpeDependenceEl.value = model.ppeDependence || 'medium';
+  safetyControlLevelEl.value = model.controlLevel || '';
+  safetyMonitoringLevelEl.value = model.monitoringLevel || '';
+  safetyPpeDependenceEl.value = model.ppeDependence || '';
   if (safetyExothermLevelEl) {
-    safetyExothermLevelEl.value = model.exothermLevel || 'medium';
+    safetyExothermLevelEl.value = model.exothermLevel || '';
   }
   if (safetyGasReleaseLevelEl) {
-    safetyGasReleaseLevelEl.value = model.gasReleaseLevel || 'medium';
+    safetyGasReleaseLevelEl.value = model.gasReleaseLevel || '';
   }
   if (safetyStageChargeEl) {
-    safetyStageChargeEl.value = (model.stageRisks && model.stageRisks.charge) || 'medium';
+    safetyStageChargeEl.value = (model.stageRisks && model.stageRisks.charge) || '';
   }
   if (safetyStageReactionEl) {
-    safetyStageReactionEl.value = (model.stageRisks && model.stageRisks.reaction) || 'medium';
+    safetyStageReactionEl.value = (model.stageRisks && model.stageRisks.reaction) || '';
   }
   if (safetyStageQuenchEl) {
-    safetyStageQuenchEl.value = (model.stageRisks && model.stageRisks.quench) || 'medium';
+    safetyStageQuenchEl.value = (model.stageRisks && model.stageRisks.quench) || '';
   }
   if (safetyStageIsolationEl) {
-    safetyStageIsolationEl.value = (model.stageRisks && model.stageRisks.isolation) || 'medium';
+    safetyStageIsolationEl.value = (model.stageRisks && model.stageRisks.isolation) || '';
   }
   safetyNotesEl.value = model.notes || '';
 }
@@ -3919,33 +3939,43 @@ function bindSafetyInputs() {
 
   wire(safetyDangerCountEl, 'input', (el) => {
     state.safetyScreening.dangerCount = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyWarningCountEl, 'input', (el) => {
     state.safetyScreening.warningCount = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyHasCmrEl, 'change', (el) => {
     state.safetyScreening.hasCmr = el.checked;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyHasFlammableEl, 'change', (el) => {
     state.safetyScreening.hasFlammable = el.checked;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyRunawayRiskEl, 'change', (el) => {
     state.safetyScreening.runawayRisk = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyMaxTempEl, 'input', (el) => {
     state.safetyScreening.maxTempC = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyMaxPressureEl, 'input', (el) => {
     state.safetyScreening.maxPressureBar = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyControlLevelEl, 'change', (el) => {
     state.safetyScreening.controlLevel = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyMonitoringLevelEl, 'change', (el) => {
     state.safetyScreening.monitoringLevel = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyPpeDependenceEl, 'change', (el) => {
     state.safetyScreening.ppeDependence = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyNotesEl, 'input', (el) => {
     state.safetyScreening.notes = el.value;
@@ -3962,42 +3992,51 @@ function bindSafetyInputs() {
         eq: '1.00',
         amountG: ''
       });
+      markRouteSafetyAnalysisStale();
       syncSafetyInputsFromState();
+      refreshSummary();
     });
   }
 
   wire(safetyScaleLevelEl, 'change', (el) => {
     state.safetyScreening.scaleLevel = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyExothermLevelEl, 'change', (el) => {
     state.safetyScreening.exothermLevel = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyGasReleaseLevelEl, 'change', (el) => {
     state.safetyScreening.gasReleaseLevel = el.value;
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyStageChargeEl, 'change', (el) => {
     state.safetyScreening.stageRisks = {
       ...(state.safetyScreening.stageRisks || {}),
       charge: el.value
     };
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyStageReactionEl, 'change', (el) => {
     state.safetyScreening.stageRisks = {
       ...(state.safetyScreening.stageRisks || {}),
       reaction: el.value
     };
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyStageQuenchEl, 'change', (el) => {
     state.safetyScreening.stageRisks = {
       ...(state.safetyScreening.stageRisks || {}),
       quench: el.value
     };
+    markRouteSafetyAnalysisStale();
   });
   wire(safetyStageIsolationEl, 'change', (el) => {
     state.safetyScreening.stageRisks = {
       ...(state.safetyScreening.stageRisks || {}),
       isolation: el.value
     };
+    markRouteSafetyAnalysisStale();
   });
 
   syncSafetyInputsFromState();
@@ -4189,6 +4228,7 @@ async function runRouteReactantRiskAnalysis() {
     noteParts.push(`Unresolved reactants: ${failed.join(', ')}`);
   }
   state.safetyScreening.notes = `${noteParts.join('; ')}.`;
+  state.safetyScreening.analysisCompletedAt = new Date().toISOString();
 
   syncSafetyInputsFromState();
   refreshSummary();
@@ -4210,6 +4250,7 @@ function refreshSummary() {
   renderRecommendationModel(total, summary, comparisonInfo, safetyResult);
   renderRejectedComparisonList();
   scheduleAutoSave();
+
   const isUnlocked = updateVisualizationLockState(summary);
   if (!isUnlocked) {
     return;
@@ -4506,6 +4547,13 @@ function applyLoadedAssessmentResult(result) {
         }
       }
     : getDefaultSafetyScreening();
+
+  if (!state.safetyScreening.analysisCompletedAt) {
+    const loadedEvidence = Array.isArray(state.safetyScreening.routeEvidence) ? state.safetyScreening.routeEvidence : [];
+    if (loadedEvidence.length > 0) {
+      state.safetyScreening.analysisCompletedAt = 'legacy-import';
+    }
+  }
 
   if (!Array.isArray(state.safetyScreening.reactantRows) || state.safetyScreening.reactantRows.length === 0) {
     const legacyText = String(saved?.safetyScreening?.reactantListText || '').trim();
