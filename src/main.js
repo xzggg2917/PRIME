@@ -168,6 +168,10 @@ function createMainWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
+ipcMain.on('app:close', () => {
+  app.quit();
+});
+
 ipcMain.handle('assessment:load', async () => {
   try {
     const userDataPath = app.getPath('userData');
@@ -385,7 +389,8 @@ function buildReportHtml(payload) {
     buildVisualCard('Weighted Ring', visuals.weightedRing, 'Ring composition of weighted principle scores.'),
     buildVisualCard('Comparison Radar', visuals.comparisonRadar, 'Overlay comparison between current route and loaded comparison files.'),
     buildVisualCard('Safety Driver Contribution', visuals.safetyDriver, 'Top safety risk drivers by score deduction points.'),
-    buildVisualCard('Safety Stage Radar', visuals.safetyStageRadar, 'Charging, reaction, quench, and isolation stage safety profile.')
+    buildVisualCard('Safety Stage Radar', visuals.safetyStageRadar, 'Charging, reaction, quench, and isolation stage safety profile.'),
+    buildVisualCard('Safety Score vs Confidence Map', visuals.safetyScoreConfidenceMap, 'Joint map of safety score (Y) and confidence (X).')
   ].join('');
 
   return `<!doctype html>

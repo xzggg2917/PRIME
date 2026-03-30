@@ -324,8 +324,8 @@
 
       const labelX = centerX + (maxRadius + 26) * Math.cos(angle);
       const labelY = centerY + (maxRadius + 26) * Math.sin(angle);
-      ctx.fillStyle = '#2f2a25';
-      ctx.font = '12px "Segoe UI", sans-serif';
+      ctx.fillStyle = '#000000';
+      ctx.font = '700 14px "Segoe UI", sans-serif';
       ctx.textAlign = labelX >= centerX ? 'left' : 'right';
       ctx.textBaseline = 'middle';
       ctx.fillText(label, labelX, labelY);
@@ -460,7 +460,7 @@
       ctx.stroke();
 
       ctx.fillStyle = 'rgba(242, 251, 241, 0.96)';
-      const indexFontPx = Math.max(12, Math.round(size * 0.45));
+      const indexFontPx = Math.max(14, Math.round(size * 0.5));
       ctx.font = `700 ${indexFontPx}px "Segoe UI", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -540,8 +540,8 @@
     const overallVisual = getScoreVisual(score);
     const assessmentText = overallVisual.label;
 
-    ctx.fillStyle = 'rgba(236, 247, 240, 0.95)';
-    ctx.font = '700 20px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#000000';
+    ctx.font = '800 24px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(assessmentText, centerX, centerY + 96);
@@ -550,7 +550,7 @@
     ctx.fillStyle = overallVisual.solid;
     ctx.shadowColor = overallVisual.glow;
     ctx.shadowBlur = 10;
-    ctx.font = '700 44px "Segoe UI", sans-serif';
+    ctx.font = '800 50px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(score.toFixed(2), centerX, centerY + 138);
@@ -661,11 +661,15 @@
         ctx.save();
         ctx.translate(lx, ly);
         ctx.rotate(mid + Math.PI / 2);
-        ctx.fillStyle = 'rgba(16, 26, 32, 0.88)';
-        ctx.font = '700 14px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#000000';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(`P${idx + 1}`, 0, 0);
+        // Line 1: principle ID
+        ctx.font = '800 15px "Segoe UI", sans-serif';
+        ctx.fillText(`P${idx + 1}`, 0, -9);
+        // Line 2: real score (0.00 – 1.00 scale)
+        ctx.font = '700 13px "Segoe UI", sans-serif';
+        ctx.fillText(v.toFixed(2), 0, 9);
         ctx.restore();
       }
 
@@ -694,13 +698,13 @@
 
     const scoreVisual = getScoreVisual(score);
     ctx.fillStyle = scoreVisual.strong;
-    ctx.font = '700 28px "Segoe UI", sans-serif';
+    ctx.font = '800 34px "Segoe UI", sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(score.toFixed(2), centerX, centerY - 6);
 
-    ctx.fillStyle = 'rgba(84, 98, 109, 0.86)';
-    ctx.font = '700 13px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#000000';
+    ctx.font = '800 16px "Segoe UI", sans-serif';
     ctx.fillText(`${totalScore.toFixed(2)} / 1.00`, centerX, centerY + 18);
 
     hoverRegions.push({

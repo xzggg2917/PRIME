@@ -2,7 +2,7 @@
 
 Usage:
     python scripts/build_question_visuals.py
-    python scripts/build_question_visuals.py --output artifacts/p12_rule_mosaic.png --dpi 220
+    python scripts/build_question_visuals.py --output artifacts/p12_rule_mosaic.png --dpi 300
 """
 
 from __future__ import annotations
@@ -169,7 +169,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a P1-P12 mosaic image from project scoring rules.")
     parser.add_argument("--output", default="artifacts/p12_rule_mosaic.png", help="Output image path")
     parser.add_argument("--cols", type=int, default=4, help="Number of subplot columns")
-    parser.add_argument("--dpi", type=int, default=200, help="Output DPI")
+    parser.add_argument("--dpi", type=int, default=300, help="Output DPI")
     return parser.parse_args()
 
 

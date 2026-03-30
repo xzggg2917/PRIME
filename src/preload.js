@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   lookupHazardChemical: (payload) => ipcRenderer.invoke('hazard:lookup', payload),
   exportReportPdf: (payload) => ipcRenderer.invoke('report:export-pdf', payload),
   loadViewPreference: () => ipcRenderer.invoke('view:load'),
-  saveViewPreference: (payload) => ipcRenderer.invoke('view:save', payload)
+  saveViewPreference: (payload) => ipcRenderer.invoke('view:save', payload),
+  closeApp: () => ipcRenderer.send('app:close')
 });

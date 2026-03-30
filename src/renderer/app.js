@@ -63,7 +63,7 @@ const P3_OPTIONS = [
     key: 'C',
     label: 'C. High Hazard (0.3)',
     score: 0.3,
-    statement: 'The route includes at least one Danger-level substance with relatively high acute or chronic toxicity concerns.',
+    statement: 'The route includes at least one Danger-level substance with relatively high acute or significant environmental impact concerns.',
     description: 'Example: tetrahydrofuran-like higher-risk reagents/solvents or hazardous by-products generated during operations.'
   },
   {
@@ -106,10 +106,10 @@ const P5_OPTIONS = [
   },
   {
     key: 'E',
-    label: 'E. Very Poor / Ozone-Depleting Red-Line Substances (0.0)',
+    label: 'E. Very Poor / Phase-Out Red-Line Substances (0.0)',
     score: 0.0,
-    statement: 'The process uses internationally restricted ozone-depleting or extreme red-line auxiliary substances.',
-    description: 'Example: carbon tetrachloride or banned CFC-type auxiliaries under treaty restrictions.'
+    statement: 'The process uses auxiliary substances that are strictly restricted by international conventions (such as the Montreal Protocol), or are highly carcinogenic and severely damaging to the ozone layer, and are to be phased out.',
+    description: 'Example: using benzene (a strong carcinogen) as an azeotropic dehydrating agent or solvent, or using carbon tetrachloride and other halocarbons that damage the ozone layer.'
   }
 ];
 
@@ -156,7 +156,7 @@ const P7_OPTIONS = [
     key: 'B',
     label: 'B. Good / Renewable or Waste-Upcycling Route with Partial Carbon Offset (0.6)',
     score: 0.6,
-    statement: 'Feedstocks are renewable or waste-derived, but conversion depends on noticeable energy/auxiliary input that partly offsets carbon benefits (C_in approximately C_out).',
+    statement: 'Feedstocks are renewable, but conversion depends on noticeable energy/auxiliary input that partly offsets carbon benefits (C_in approximately C_out),  or waste-derived',
     description: 'Use this when renewable sourcing exists but process burden weakens the net carbon gain.'
   },
   {
@@ -350,7 +350,17 @@ function getDefaultFlowerWeights() {
 
 const WEIGHT_TARGET_TOTAL = 100;
 const WEIGHT_TOLERANCE = 0.01;
-const WEIGHT_MIN_STRICT = 5;
+const WEIGHT_MIN_STRICT = 6;
+const WEIGHT_MAX_STRICT = 10;
+const LEGACY_WEIGHT_MIN_TEMPLATE = 5;
+
+function clampWeightToStrictRange(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return WEIGHT_MIN_STRICT;
+  }
+  return Math.max(WEIGHT_MIN_STRICT, Math.min(WEIGHT_MAX_STRICT, parsed));
+}
 
 function getP1DefaultDetails() {
   return {
@@ -698,6 +708,7 @@ const safetyStageIsolationEl = document.getElementById('safetyStageIsolation');
 const safetyStageHeatmapEl = document.getElementById('safetyStageHeatmap');
 const safetyDriverChartEl = document.getElementById('safetyDriverChart');
 const safetyStageRadarEl = document.getElementById('safetyStageRadar');
+const safetyScoreConfidenceMapEl = document.getElementById('safetyScoreConfidenceMap');
 
 let activeView = 'radar';
 let autoSaveTimer = null;
@@ -706,6 +717,8 @@ let manualSaveInFlight = false;
 let safetyDriverChartRegions = [];
 let safetyDriverChartRows = [];
 let safetyDriverChartActiveLabel = '';
+let activeHoverExportCanvas = null;
+let hoverExportHideTimer = null;
 
 function getDefaultDetailsById(id) {
   if (id === 'p1') {
@@ -752,7 +765,8 @@ function buildAssessmentPayload() {
     principles: state.items,
     total: getWeightedTotalScore(),
     principleWeights: state.principleWeights,
-    safetyScreening: state.safetyScreening
+    safetyScreening: state.safetyScreening,
+    comparisonSnapshots: state.comparisonSnapshots
   };
 }
 
@@ -761,9 +775,100 @@ function toCanvasDataUrl(canvas) {
     return '';
   }
   try {
-    return canvas.toDataURL('image/png');
+    // Composite onto a white background so transparent areas export as white.
+    const flat = document.createElement('canvas');
+    flat.width = canvas.width;
+    flat.height = canvas.height;
+    const flatCtx = flat.getContext('2d');
+    flatCtx.fillStyle = '#ffffff';
+    flatCtx.fillRect(0, 0, flat.width, flat.height);
+    flatCtx.drawImage(canvas, 0, 0);
+    return flat.toDataURL('image/png');
   } catch (_) {
     return '';
+  }
+}
+
+function buildComparisonRadarWithLegend() {
+  if (!compareRadarCanvasEl) return '';
+
+  const current = buildCurrentSnapshot();
+  const compatible = state.comparisonSnapshots.filter((s) => hasSameWeightProfile(current.weights, s.weights));
+  const datasets = [current, ...compatible];
+
+  const srcW = compareRadarCanvasEl.width;
+  const srcH = compareRadarCanvasEl.height;
+
+  if (datasets.length === 0) {
+    return applyPngDpiMetadata(toCanvasDataUrl(compareRadarCanvasEl), 300);
+  }
+
+  // ── Tight right-side legend ──────────────────────────────────────
+  const FONT_SIZE = 18;
+  const SWATCH_W  = 22;
+  const GAP       = 8;    // swatch → text
+  const ITEM_H    = FONT_SIZE + 10;
+  const PAD_H     = 16;   // left padding inside legend strip
+  const PAD_V     = 12;   // top/bottom padding
+
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  measureCtx.font = `${FONT_SIZE}px "Segoe UI", Tahoma, sans-serif`;
+
+  // Labels are just the filename — no scores.
+  const labels = datasets.map((d) => d.name);
+  const maxTextW = labels.reduce((m, l) => Math.max(m, measureCtx.measureText(l).width), 0);
+
+  const legendW = Math.ceil(PAD_H + SWATCH_W + GAP + maxTextW + PAD_H);
+  const totalW  = srcW + legendW;
+  const totalH  = srcH;
+
+  const out = document.createElement('canvas');
+  out.width  = totalW;
+  out.height = totalH;
+  const ctx  = out.getContext('2d');
+
+  // White background.
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, totalW, totalH);
+
+  // Radar chart.
+  ctx.drawImage(compareRadarCanvasEl, 0, 0);
+
+  // Vertical separator.
+  ctx.strokeStyle = 'rgba(44, 57, 74, 0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(srcW, PAD_V * 2);
+  ctx.lineTo(srcW, totalH - PAD_V * 2);
+  ctx.stroke();
+
+  // Legend entries stacked vertically, vertically centred in the strip.
+  const blockH   = datasets.length * ITEM_H;
+  const startY   = Math.round((totalH - blockH) / 2);
+  const textX    = srcW + PAD_H + SWATCH_W + GAP;
+
+  datasets.forEach((dataset, i) => {
+    const color = getComparisonSeriesColor(i);
+    const cy    = startY + i * ITEM_H + ITEM_H / 2;
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 3;
+    ctx.lineCap     = 'round';
+    ctx.beginPath();
+    ctx.moveTo(srcW + PAD_H, cy);
+    ctx.lineTo(srcW + PAD_H + SWATCH_W, cy);
+    ctx.stroke();
+
+    ctx.fillStyle    = '#2e3440';
+    ctx.font         = `${FONT_SIZE}px "Segoe UI", Tahoma, sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(labels[i], textX, cy);
+  });
+
+  try {
+    return applyPngDpiMetadata(out.toDataURL('image/png'), 300);
+  } catch (_) {
+    return toCanvasDataUrl(compareRadarCanvasEl);
   }
 }
 
@@ -773,9 +878,10 @@ function buildReportExportPayload() {
     radar: toCanvasDataUrl(radarCanvas),
     flowerProfile: toCanvasDataUrl(gaugeCanvas),
     weightedRing: toCanvasDataUrl(flowerCanvas),
-    comparisonRadar: toCanvasDataUrl(compareRadarCanvasEl),
+    comparisonRadar: buildComparisonRadarWithLegend(),
     safetyDriver: toCanvasDataUrl(safetyDriverChartEl),
-    safetyStageRadar: toCanvasDataUrl(safetyStageRadarEl)
+    safetyStageRadar: toCanvasDataUrl(safetyStageRadarEl),
+    safetyScoreConfidenceMap: toCanvasDataUrl(safetyScoreConfidenceMapEl)
   };
   payload.reportContext = {
     currentFileName: getBaseName(state.currentFilePath) || 'Unsaved Draft',
@@ -906,13 +1012,7 @@ function normalizeWeightVector(weights) {
   if (!Array.isArray(weights)) {
     return [];
   }
-  return weights.map((weight) => {
-    const parsed = Number(weight);
-    if (!Number.isFinite(parsed)) {
-      return 0;
-    }
-    return Math.max(0, parsed);
-  });
+  return weights.map((weight) => clampWeightToStrictRange(weight));
 }
 
 function hasSameWeightProfile(baseWeights, candidateWeights) {
@@ -958,7 +1058,7 @@ function isWeightTotalValid(total) {
 function getInvalidWeightShortLabels() {
   return state.principleWeights
     .map((weight, index) => ({ weight: Number(weight), short: state.items[index]?.short || `P${index + 1}` }))
-    .filter((entry) => Number.isNaN(entry.weight) || entry.weight < WEIGHT_MIN_STRICT)
+    .filter((entry) => Number.isNaN(entry.weight) || entry.weight < WEIGHT_MIN_STRICT || entry.weight > WEIGHT_MAX_STRICT)
     .map((entry) => entry.short);
 }
 
@@ -1007,7 +1107,11 @@ function isLegacyPristineMinWeightTemplate(savedPrinciples, loadedWeights) {
 
   const allAtMin = loadedWeights.every((weight) => {
     const parsed = Number(weight);
-    return Number.isFinite(parsed) && Math.abs(parsed - WEIGHT_MIN_STRICT) <= WEIGHT_TOLERANCE;
+    if (!Number.isFinite(parsed)) {
+      return false;
+    }
+    return Math.abs(parsed - WEIGHT_MIN_STRICT) <= WEIGHT_TOLERANCE
+      || Math.abs(parsed - LEGACY_WEIGHT_MIN_TEMPLATE) <= WEIGHT_TOLERANCE;
   });
 
   if (!allAtMin) {
@@ -1034,6 +1138,35 @@ function clearVisualizationCanvases() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
   });
+}
+
+function hasCanvasInk(canvas) {
+  if (!canvas || canvas.width <= 0 || canvas.height <= 0) {
+    return false;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return false;
+  }
+
+  try {
+    const sampleWidth = Math.min(canvas.width, 240);
+    const sampleHeight = Math.min(canvas.height, 180);
+    const offsetX = Math.max(0, Math.floor((canvas.width - sampleWidth) / 2));
+    const offsetY = Math.max(0, Math.floor((canvas.height - sampleHeight) / 2));
+    const data = ctx.getImageData(offsetX, offsetY, sampleWidth, sampleHeight).data;
+
+    // Sparse sampling is enough to detect whether chart content has been painted.
+    for (let i = 0; i < data.length; i += 64) {
+      if (data[i] !== 0 || data[i + 1] !== 0 || data[i + 2] !== 0 || data[i + 3] !== 0) {
+        return true;
+      }
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
 }
 
 function renderBottomTextVisualization(total) {
@@ -1087,10 +1220,7 @@ function buildCurrentSnapshot() {
     filePath: null,
     name: activeName,
     values: state.items.map((item) => clampScore(item.score)),
-    weights: state.principleWeights.map((weight) => {
-      const parsed = Number(weight);
-      return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-    }),
+    weights: state.principleWeights.map((weight) => clampWeightToStrictRange(weight)),
     total: getWeightedTotalScore()
   };
 }
@@ -1108,8 +1238,7 @@ function normalizeComparisonEntry(entry) {
     : getDefaultFlowerWeights();
 
   const weights = rawWeights.map((weight) => {
-    const parsed = Number(weight);
-    return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+    return clampWeightToStrictRange(weight);
   });
 
   let total = Number(payload.total);
@@ -1199,8 +1328,8 @@ function drawComparisonRadar() {
     ctx.strokeStyle = 'rgba(74, 96, 125, 0.2)';
     ctx.stroke();
 
-    ctx.font = '12px Segoe UI';
-    ctx.fillStyle = '#34495e';
+    ctx.font = '700 14px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#000000';
     ctx.textAlign = label.x >= cx ? 'left' : 'right';
     ctx.textBaseline = 'middle';
     ctx.fillText(PRINCIPLES[i].short, label.x, label.y);
@@ -1302,6 +1431,47 @@ function createModelCard(title, body) {
   card.appendChild(heading);
   card.appendChild(content);
   return card;
+}
+
+function getPrinciplePerformanceBand(score) {
+  const v = clampScore(score);
+  if (v <= 0.1) {
+    return 'critical';
+  }
+  if (v <= 0.3) {
+    return 'weak';
+  }
+  if (v <= 0.6) {
+    return 'developing';
+  }
+  if (v <= 0.8) {
+    return 'solid';
+  }
+  return 'strong';
+}
+
+function buildCritiqueSentence(item, weightedGap) {
+  const band = getPrinciplePerformanceBand(item.score);
+  const scoreText = `${item.score.toFixed(2)} / 1.00`;
+  const gapText = weightedGap.toFixed(3);
+
+  if (band === 'critical') {
+    return `${item.short} is a critical weakness at ${scoreText}. This principle is currently creating a severe sustainability bottleneck (weighted improvement gap ${gapText}).`;
+  }
+  if (band === 'weak') {
+    return `${item.short} is weak at ${scoreText}. Current practice is still far from green-chemistry expectations (weighted improvement gap ${gapText}).`;
+  }
+  return `${item.short} is below target at ${scoreText}. This principle still has meaningful headroom for optimization (weighted improvement gap ${gapText}).`;
+}
+
+function buildPraiseSentence(item) {
+  const band = getPrinciplePerformanceBand(item.score);
+  const scoreText = `${item.score.toFixed(2)} / 1.00`;
+
+  if (band === 'strong') {
+    return `${item.short} is excellent at ${scoreText}. This is a proven strength of the current route and should be protected during future changes.`;
+  }
+  return `${item.short} is solid at ${scoreText}. This area is performing well and should be maintained while weaker principles are upgraded.`;
 }
 
 function toSafeNonNegativeNumber(value) {
@@ -1791,7 +1961,11 @@ function drawSafetyDriverChart(canvas, contributions, activeLabel = '') {
 
   ctx.clearRect(0, 0, width, height);
 
-  const left = 215;
+  const labelFont = '800 18px "Segoe UI", sans-serif';
+  ctx.font = labelFont;
+  const labelTexts = rows.map((item) => shortenLabel(item.label, 34));
+  const maxLabelWidth = labelTexts.reduce((max, text) => Math.max(max, ctx.measureText(text).width), 0);
+  const left = Math.min(Math.max(160, Math.ceil(maxLabelWidth) + 34), Math.floor(width * 0.5));
   const right = 76;
   const top = 22;
   const bottom = 24;
@@ -1814,11 +1988,11 @@ function drawSafetyDriverChart(canvas, contributions, activeLabel = '') {
     const maxBarWidth = width - barX - right;
     const barWidth = Math.max(0, (points / maxValue) * maxBarWidth);
 
-    ctx.fillStyle = '#224944';
-    ctx.font = '700 12px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#000000';
+    ctx.font = labelFont;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    ctx.fillText(shortenLabel(item.label, 30), left - 10, centerY);
+    ctx.fillText(labelTexts[index], left - 10, centerY);
 
     ctx.fillStyle = 'rgba(77, 123, 112, 0.16)';
     ctx.fillRect(barX, barY, maxBarWidth, barHeight);
@@ -1834,8 +2008,8 @@ function drawSafetyDriverChart(canvas, contributions, activeLabel = '') {
       ctx.strokeRect(barX - 1, barY - 1, barWidth + 2, barHeight + 2);
     }
 
-    ctx.fillStyle = '#2a4d48';
-    ctx.font = '700 12px "Segoe UI", sans-serif';
+    ctx.fillStyle = '#000000';
+    ctx.font = labelFont;
     ctx.textAlign = 'right';
     const valueX = Math.min(width - 8, barX + barWidth + 44);
     ctx.fillText(`-${points.toFixed(1)}`, valueX, centerY);
@@ -1892,7 +2066,7 @@ function drawSafetyStageRadar(canvas, stageBreakdown) {
   const height = canvas.height;
   const outerPadding = 12;
   const labelGap = 14;
-  const labelFont = '800 13px "Segoe UI", sans-serif';
+  const labelFont = '700 20px "Segoe UI", sans-serif';
 
   ctx.font = labelFont;
   const stageLabels = stages.map((item) => String(item.stage || ''));
@@ -1958,7 +2132,7 @@ function drawSafetyStageRadar(canvas, stageBreakdown) {
 
     const labelX = centerX + (maxRadius * stretchX + 12) * Math.cos(angle);
     const labelY = centerY + (maxRadius * stretchY + 12) * Math.sin(angle);
-    ctx.fillStyle = '#234542';
+    ctx.fillStyle = '#000000';
     ctx.font = labelFont;
     const horizontal = Math.cos(angle);
     if (Math.abs(horizontal) < 0.2) {
@@ -1967,9 +2141,6 @@ function drawSafetyStageRadar(canvas, stageBreakdown) {
       ctx.textAlign = labelX >= centerX ? 'left' : 'right';
     }
     ctx.textBaseline = 'middle';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(248, 253, 251, 0.9)';
-    ctx.strokeText(item.stage, labelX, labelY);
     ctx.fillText(item.stage, labelX, labelY);
   });
 
@@ -1997,6 +2168,209 @@ function drawSafetyStageRadar(canvas, stageBreakdown) {
   ctx.lineWidth = 2.2;
   ctx.fill();
   ctx.stroke();
+}
+
+function drawSafetyScoreConfidenceMap(canvas, score100, confidence) {
+  if (!canvas) {
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.max(420, Math.floor(rect.width || canvas.width || 760));
+  const cssHeight = Math.max(260, Math.floor(rect.height || canvas.height || 320));
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+  const pixelWidth = Math.max(1, Math.floor(cssWidth * dpr));
+  const pixelHeight = Math.max(1, Math.floor(cssHeight * dpr));
+
+  if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+    canvas.width = pixelWidth;
+    canvas.height = pixelHeight;
+  }
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    return;
+  }
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const width = cssWidth;
+  const height = cssHeight;
+  const left = 84;
+  const right = 26;
+  const top = 24;
+  const bottom = 64;
+  const plotWidth = Math.max(120, width - left - right);
+  const plotHeight = Math.max(120, height - top - bottom);
+  const plotRight = left + plotWidth;
+  const plotBottom = top + plotHeight;
+
+  ctx.clearRect(0, 0, width, height);
+
+  // Build a 2D heat map from Safety Score (Y) and Confidence (X).
+  const grid = 20;
+  for (let gx = 0; gx < grid; gx += 1) {
+    for (let gy = 0; gy < grid; gy += 1) {
+      const conf = (gx + 0.5) / grid;
+      const scoreNorm = (gy + 0.5) / grid;
+      const combined = clampUnit(scoreNorm * 0.65 + conf * 0.35);
+      const cellVisual = getScaleVisual(combined);
+      const x0 = left + (gx / grid) * plotWidth;
+      const y0 = plotBottom - ((gy + 1) / grid) * plotHeight;
+      const cw = plotWidth / grid;
+      const ch = plotHeight / grid;
+
+      ctx.fillStyle = toRgba(cellVisual.solid, 0.24);
+      ctx.fillRect(x0, y0, cw + 0.5, ch + 0.5);
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(45, 76, 72, 0.22)';
+  ctx.lineWidth = 1;
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const x = left + (tick / 5) * plotWidth;
+    const y = top + (tick / 5) * plotHeight;
+
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x, plotBottom);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(left, y);
+    ctx.lineTo(plotRight, y);
+    ctx.stroke();
+  }
+
+  const contourLevels = [0.35, 0.55, 0.75];
+  contourLevels.forEach((level) => {
+    const p1 = { x: 0, y: (level - 0.35 * 0) / 0.65 };
+    const p2 = { x: 1, y: (level - 0.35 * 1) / 0.65 };
+    const clipped = [p1, p2]
+      .map((p) => ({ x: p.x, y: Math.max(0, Math.min(1, p.y)) }));
+
+    ctx.beginPath();
+    ctx.setLineDash([6, 6]);
+    ctx.strokeStyle = 'rgba(22, 52, 49, 0.45)';
+    ctx.lineWidth = 1.2;
+    ctx.moveTo(left + clipped[0].x * plotWidth, plotBottom - clipped[0].y * plotHeight);
+    ctx.lineTo(left + clipped[1].x * plotWidth, plotBottom - clipped[1].y * plotHeight);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+
+  ctx.strokeStyle = 'rgba(26, 57, 53, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(left, top, plotWidth, plotHeight);
+
+  ctx.fillStyle = '#000000';
+  ctx.font = '700 18px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const x = left + (tick / 5) * plotWidth;
+    const v = tick / 5;
+    ctx.fillText(v.toFixed(1), x, plotBottom + 8);
+  }
+
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let tick = 0; tick <= 5; tick += 1) {
+    const y = plotBottom - (tick / 5) * plotHeight;
+    const v = tick * 20;
+    ctx.fillText(String(v), left - 8, y);
+  }
+
+  ctx.font = '700 22px "Segoe UI", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('Confidence', left + plotWidth / 2, height - 8);
+
+  ctx.save();
+  ctx.translate(16, top + plotHeight / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText('Safety Score', 0, 0);
+  ctx.restore();
+
+  function drawZoneLabel(text, x, y) {
+    const zoneFont = '700 20px "Segoe UI", sans-serif';
+    ctx.font = zoneFont;
+    const padX = 8;
+    const padY = 4;
+    const metrics = ctx.measureText(text);
+    const tw = metrics.width;
+    const th = 24;
+
+    ctx.fillStyle = 'rgba(248, 252, 251, 0.92)';
+    ctx.strokeStyle = 'rgba(27, 70, 65, 0.18)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x - padX, y - th + 2 - padY, tw + padX * 2, th + padY * 2, 7);
+    } else {
+      ctx.rect(x - padX, y - th + 2 - padY, tw + padX * 2, th + padY * 2);
+    }
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#000000';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(text, x, y);
+  }
+
+  drawZoneLabel('Acceptable Zone', left + plotWidth * 0.68, top + 44);
+  drawZoneLabel('Watch Zone', left + plotWidth * 0.43, top + plotHeight * 0.52);
+  drawZoneLabel('High Concern Zone', left + 14, top + plotHeight * 0.89);
+
+  const safeScore100 = Math.max(0, Math.min(100, Number(score100) || 0));
+  const safeConfidence = clampUnit(Number(confidence) || 0);
+  const px = left + safeConfidence * plotWidth;
+  const py = plotBottom - (safeScore100 / 100) * plotHeight;
+  const markerVisual = getScaleVisual(clampUnit((safeScore100 / 100) * 0.65 + safeConfidence * 0.35));
+
+  ctx.beginPath();
+  ctx.fillStyle = toRgba(markerVisual.solid, 0.25);
+  ctx.arc(px, py, 11, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.fillStyle = markerVisual.strong;
+  ctx.arc(px, py, 5.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+
+  const label = `S ${safeScore100.toFixed(1)} | C ${safeConfidence.toFixed(2)}`;
+  ctx.font = '700 18px "Segoe UI", sans-serif';
+  const onRight = px > left + plotWidth * 0.62;
+  const paddingX = 12;
+  const paddingY = 7;
+  const textWidth = ctx.measureText(label).width;
+  const badgeWidth = textWidth + paddingX * 2;
+  const badgeHeight = 34;
+  const badgeX = onRight ? px - 14 - badgeWidth : px + 14;
+  const badgeY = Math.max(top + 6, Math.min(plotBottom - badgeHeight - 6, py - 30));
+
+  ctx.fillStyle = 'rgba(248, 252, 251, 0.94)';
+  ctx.strokeStyle = 'rgba(27, 70, 65, 0.28)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(badgeX, badgeY, badgeWidth, badgeHeight, 7);
+  } else {
+    ctx.rect(badgeX, badgeY, badgeWidth, badgeHeight);
+  }
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = '#000000';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, badgeX + paddingX, badgeY + badgeHeight / 2);
 }
 
 function renderSafetyPrecheck() {
@@ -2069,6 +2443,7 @@ function renderSafetyPrecheck() {
   }
   drawSafetyDriverChart(safetyDriverChartEl, result.driverContributions, safetyDriverChartActiveLabel);
   drawSafetyStageRadar(safetyStageRadarEl, result.stageBreakdown);
+  drawSafetyScoreConfidenceMap(safetyScoreConfidenceMapEl, result.score100, result.confidence);
 
   return result;
 }
@@ -2388,39 +2763,69 @@ function renderRecommendationModel(total, weightSummary, comparisonInfo = { comp
   modelGradeEl.title = `${gradeVisual.label} (${total.toFixed(2)})`;
   modelConfidenceEl.textContent = confidence.toFixed(2);
 
-  const current = comparisonInfo.currentSnapshot || buildCurrentSnapshot();
-  const compatibleSnapshots = Array.isArray(comparisonInfo.compatibleSnapshots) ? comparisonInfo.compatibleSnapshots : [];
-  const analysisRoutes = [
-    current,
-    ...compatibleSnapshots.map((snapshot) => ({
-      ...snapshot,
-      name: snapshot.name || 'Compared Route'
-    }))
-  ];
-  const structuredAnalysis = buildStructuredMultiRouteAnalysis(analysisRoutes);
+  const weightedRows = state.items
+    .map((item, index) => {
+      const weight = Number(state.principleWeights[index] || 0);
+      const safeWeight = Number.isFinite(weight) ? Math.max(0, weight) : 0;
+      const normalizedScore = clampScore(item.score);
+      const weightedGap = (1 - normalizedScore) * (safeWeight / 100);
+      return {
+        item,
+        weight: safeWeight,
+        weightedGap,
+        weightedScore: normalizedScore * (safeWeight / 100)
+      };
+    })
+    .sort((a, b) => b.weightedGap - a.weightedGap);
 
-  const generatedReport = {
-    evaluation: generateEvaluationNarrative(structuredAnalysis),
-    roadmap: generateRoadmapNarrative(structuredAnalysis),
-    fusion: generateFusionNarrative(structuredAnalysis)
-  };
-
-  const generationValid = validateGeneratedNarratives(generatedReport, structuredAnalysis);
-  if (!generationValid) {
-    generatedReport.evaluation = `Generated narrative fallback: ${structuredAnalysis.topRoute?.name || 'N/A'} leads with ${structuredAnalysis.topRoute?.total.toFixed(2) || '0.00'} / 1.00 across ${structuredAnalysis.routeCount} route(s).`;
-    generatedReport.roadmap = generateRoadmapNarrative(structuredAnalysis);
-    generatedReport.fusion = `Generated fusion fallback: Optimized Route Plan estimated total ${structuredAnalysis.fusionTotal.toFixed(2)} / 1.00.`;
-  }
-
-  const mismatchNote = comparisonInfo.incompatibleCount > 0
-    ? ` ${comparisonInfo.incompatibleCount} comparison file(s) were excluded due to different weights to avoid pseudo-green conclusions.`
-    : '';
+  const criticalRows = weightedRows
+    .filter((row) => row.item.score <= 0.6)
+    .slice(0, 4);
+  const strengthRows = [...weightedRows]
+    .filter((row) => row.item.score > 0.6)
+    .sort((a, b) => b.item.score - a.item.score)
+    .slice(0, 4);
 
   const safetyNote = safetyResult
-    ? ` Safety precheck: ${safetyResult.level} risk (${safetyResult.score100.toFixed(1)} / 100, confidence ${safetyResult.confidence.toFixed(2)}), analyzed reactants ${Number(safetyResult.evidenceCount || 0)}.`
+    ? ` Safety precheck: ${safetyResult.level} risk (${safetyResult.score100.toFixed(1)} / 100, confidence ${safetyResult.confidence.toFixed(2)}).`
     : '';
-  const baseSummary = `Generation mode: local deterministic engine. Current route grade is ${grade}, current total ${total.toFixed(2)} / 1.00, compatible route count is ${structuredAnalysis.routeCount - 1}, and weight profile is ${weightProfileState}.${mismatchNote}${safetyNote}`;
-  renderModelNarrativeCards(baseSummary, generatedReport);
+
+  modelSummaryEl.textContent = `Current-route standalone evaluation mode. Grade ${grade}, total ${total.toFixed(2)} / 1.00, weight profile ${weightProfileState}.${safetyNote}`;
+  modelPriorityListEl.innerHTML = '';
+  modelStrengthListEl.innerHTML = '';
+
+  if (criticalRows.length === 0) {
+    modelPriorityListEl.appendChild(createModelCard(
+      'Critical Review',
+      'No principle is below 0.60. The route currently has no major weak point under this scoring profile.'
+    ));
+  } else {
+    criticalRows.forEach((row, index) => {
+      const critique = buildCritiqueSentence(row.item, row.weightedGap);
+      const optimization = PRINCIPLE_RECOMMENDATION_LIBRARY[row.item.id] || 'Refine this principle with a targeted process redesign and verify score uplift in the next cycle.';
+      modelPriorityListEl.appendChild(createModelCard(
+        `Critical Review ${index + 1}: ${row.item.short} ${row.item.title}`,
+        `${critique} Optimization: ${optimization}`
+      ));
+    });
+  }
+
+  if (strengthRows.length === 0) {
+    modelStrengthListEl.appendChild(createModelCard(
+      'Strength Signal',
+      'No principle is above 0.60 yet. Focus first on lifting the critical principles before locking strengths.'
+    ));
+    return;
+  }
+
+  strengthRows.forEach((row, index) => {
+    const praise = buildPraiseSentence(row.item);
+    const keepAdvice = `Keep-control focus: avoid optimization actions that reduce ${row.item.short} performance while improving weaker principles.`;
+    modelStrengthListEl.appendChild(createModelCard(
+      `Strength ${index + 1}: ${row.item.short} ${row.item.title}`,
+      `${praise} ${keepAdvice}`
+    ));
+  });
 }
 
 function updateVisualizationLockState(summary) {
@@ -2437,8 +2842,8 @@ function updateVisualizationLockState(summary) {
 
   if (!unlocked) {
     const detailLine = !summary.minValid
-      ? `<p>Invalid weight (&lt; ${WEIGHT_MIN_STRICT.toFixed(0)}%) detected: <strong>${summary.invalidItems.join(', ')}</strong></p>`
-      : `<p>All individual weights are valid (&gt;= ${WEIGHT_MIN_STRICT.toFixed(0)}%).</p>`;
+      ? `<p>Invalid weight (must be ${WEIGHT_MIN_STRICT.toFixed(0)}% to ${WEIGHT_MAX_STRICT.toFixed(0)}%) detected: <strong>${summary.invalidItems.join(', ')}</strong></p>`
+      : `<p>All individual weights are valid (${WEIGHT_MIN_STRICT.toFixed(0)}% to ${WEIGHT_MAX_STRICT.toFixed(0)}%).</p>`;
 
     vizLockOverlayEl.innerHTML = [
       '<h4>Visualization Locked</h4>',
@@ -2461,6 +2866,17 @@ function openRouteSafetyPage() {
     return;
   }
   routeSafetyPageEl.classList.remove('hidden');
+  // Ensure safety canvases re-render after page becomes visible.
+  window.requestAnimationFrame(() => {
+    renderSafetyPrecheck();
+
+    // Fallback: if the map is still blank after first paint, force one more redraw.
+    window.setTimeout(() => {
+      if (!hasCanvasInk(safetyScoreConfidenceMapEl)) {
+        renderSafetyPrecheck();
+      }
+    }, 120);
+  });
   setStatus('Route safety prediction workspace opened.');
 }
 
@@ -2656,10 +3072,10 @@ function renderForm() {
     weightInput.type = 'number';
     weightInput.step = '0.01';
     weightInput.min = WEIGHT_MIN_STRICT.toFixed(2);
-    weightInput.max = '100';
+    weightInput.max = WEIGHT_MAX_STRICT.toFixed(2);
     weightInput.value = Number(state.principleWeights[index] ?? WEIGHT_MIN_STRICT).toFixed(2);
     weightInput.setAttribute('aria-label', `${item.short} weight`);
-    weightInput.title = `Weight percentage for this principle (must be >= ${WEIGHT_MIN_STRICT.toFixed(0)} and <= 100)`;
+    weightInput.title = `Weight percentage for this principle (must be >= ${WEIGHT_MIN_STRICT.toFixed(0)} and <= ${WEIGHT_MAX_STRICT.toFixed(0)})`;
 
     weightInput.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -2670,14 +3086,14 @@ function renderForm() {
       if (Number.isNaN(raw)) {
         return;
       }
-      const clamped = Math.max(-100, Math.min(100, raw));
+      const clamped = clampWeightToStrictRange(raw);
       state.principleWeights[index] = clamped;
       refreshSummary();
       const summary = getWeightValidationSummary();
       if (summary.minValid && summary.totalValid) {
         setStatus(`${item.short} weight updated to ${clamped.toFixed(2)}%. Weight total is ${summary.totalWeight.toFixed(2)}%. Visualization unlocked.`);
       } else if (!summary.minValid) {
-        setStatus(`${item.short} weight updated to ${clamped.toFixed(2)}%. Invalid weight detected (< ${WEIGHT_MIN_STRICT.toFixed(0)}%): ${summary.invalidItems.join(', ')}. Visualization remains locked.`);
+        setStatus(`${item.short} weight updated to ${clamped.toFixed(2)}%. Invalid weight detected (must be ${WEIGHT_MIN_STRICT.toFixed(0)}% to ${WEIGHT_MAX_STRICT.toFixed(0)}%): ${summary.invalidItems.join(', ')}. Visualization remains locked.`);
       } else {
         setStatus(`${item.short} weight updated to ${clamped.toFixed(2)}%. Current total is ${summary.totalWeight.toFixed(2)}%. Set total to 100.00% to unlock visualization.`);
       }
@@ -2685,7 +3101,7 @@ function renderForm() {
 
     weightInput.addEventListener('blur', () => {
       const raw = Number(weightInput.value);
-      if (!Number.isFinite(raw) || raw < WEIGHT_MIN_STRICT) {
+      if (!Number.isFinite(raw)) {
         state.principleWeights[index] = WEIGHT_MIN_STRICT;
         weightInput.value = WEIGHT_MIN_STRICT.toFixed(2);
         refreshSummary();
@@ -2699,7 +3115,7 @@ function renderForm() {
         return;
       }
 
-      const normalized = Math.max(WEIGHT_MIN_STRICT, Math.min(100, raw));
+      const normalized = clampWeightToStrictRange(raw);
       state.principleWeights[index] = normalized;
       weightInput.value = normalized.toFixed(2);
       refreshSummary();
@@ -2826,15 +3242,6 @@ function renderForm() {
     unitNote.className = 'p1-unit-note';
     unitNote.textContent = 'Unit note: use the same unit for m_in and m_out (for example both kg or both g).';
 
-    const formulaCard = document.createElement('article');
-    formulaCard.className = 'p1-card';
-    formulaCard.innerHTML = [
-      '<h4>Core Algorithm and Scoring Logic</h4>',
-      '<p class="p1-formula">PMI = Σm_in / m_out</p>',
-      '<p class="p1-formula">Score = max(0, 1 - log10(PMI) / 3)</p>',
-      '<p class="p1-note">Boundary note: PMI = 1000 corresponds to the 0-score line; when PMI > 1000, score is fixed at 0.</p>'
-    ].join('');
-
     const totalSummary = document.createElement('p');
     totalSummary.className = 'p1-total';
     if (result.pmi === null) {
@@ -2877,7 +3284,6 @@ function renderForm() {
     introCard.appendChild(unitNote);
 
     p1Wrap.appendChild(introCard);
-    p1Wrap.appendChild(formulaCard);
     p1Wrap.appendChild(validationNote);
     p1Wrap.appendChild(totalSummary);
     questionBlock.appendChild(p1Wrap);
@@ -2961,14 +3367,6 @@ function renderForm() {
     introCard.appendChild(inputControls);
     introCard.appendChild(unitNote);
 
-    const formulaCard = document.createElement('article');
-    formulaCard.className = 'p1-card';
-    formulaCard.innerHTML = [
-      '<h4>Core Algorithm</h4>',
-      '<p class="p1-formula">Score = MW_product / ΣMW_reactants</p>',
-      '<p class="p1-note">Input guard: ensure ΣMW_reactants is non-zero and greater than or equal to MW_product.</p>'
-    ].join('');
-
     const totalSummary = document.createElement('p');
     totalSummary.className = 'p1-total';
     totalSummary.textContent = `P2 Result: Score = ${activeItem.score.toFixed(3)} / 1.000`;
@@ -3000,7 +3398,6 @@ function renderForm() {
     });
 
     p2Wrap.appendChild(introCard);
-    p2Wrap.appendChild(formulaCard);
     p2Wrap.appendChild(validationNote);
     p2Wrap.appendChild(totalSummary);
     questionBlock.appendChild(p2Wrap);
@@ -3022,7 +3419,7 @@ function renderForm() {
 
     const p3Card = document.createElement('article');
     p3Card.className = 'p1-card';
-    p3Card.innerHTML = '<h4>Q1. Full-Process Hazard Level Assessment</h4>';
+    p3Card.innerHTML = '<h4>Question. Full-Process Hazard Level Assessment</h4>';
 
     const p3OptionsWrap = document.createElement('div');
     p3OptionsWrap.className = 'p1-options';
@@ -3096,7 +3493,7 @@ function renderForm() {
 
     const p5Card = document.createElement('article');
     p5Card.className = 'p1-card';
-    p5Card.innerHTML = '<h4>Q1. Necessity and Safety Assessment of Auxiliary Substances</h4>';
+    p5Card.innerHTML = '<h4>Question. Necessity and Safety Assessment of Auxiliary Substances</h4>';
 
     const p5OptionsWrap = document.createElement('div');
     p5OptionsWrap.className = 'p1-options';
@@ -3156,7 +3553,7 @@ function renderForm() {
       '<li><strong>Reaction stage:</strong> reaction solvents, catalyst-transfer solvents, and heat-transfer media.</li>',
       '<li><strong>Quench stage:</strong> quench media for terminating reactions (for example large water/ice/neutralization media).</li>',
       '<li><strong>Extraction and washing:</strong> liquid extractants and all washing liquids.</li>',
-      '<li><strong>Drying and decolorization:</strong> solid drying agents, decolorizers, and auxiliary adsorbents.</li>',
+      '<li><strong>Drying and purification:</strong> solid drying agents, decolorizers, and auxiliary adsorbents.</li>',
       '<li><strong>Separation and purification:</strong> all chromatography stationary phases and mobile phases/elution solvents, plus recrystallization solvents.</li>',
       '</ul>',
       '<p class="p1-note"><strong>Selection rule:</strong> identify the single substance with the highest hazard level among all listed stages and use it as the final basis for this principle.</p>'
@@ -3186,7 +3583,7 @@ function renderForm() {
 
     const p4Card = document.createElement('article');
     p4Card.className = 'p1-card';
-    p4Card.innerHTML = '<h4>Q1. Target-Molecule Safety Design and Hazard Assessment</h4>';
+    p4Card.innerHTML = '<h4>Question. Target-Molecule Safety Design and Hazard Assessment</h4>';
 
     const p4OptionsWrap = document.createElement('div');
     p4OptionsWrap.className = 'p1-options';
@@ -3209,7 +3606,6 @@ function renderForm() {
       const titleText = document.createElement('span');
       titleText.textContent = `${option.label}:`;
       titleRow.appendChild(titleText);
-      titleRow.appendChild(createHelpTip(option.description));
 
       const statementRow = document.createElement('span');
       statementRow.className = 'p4-option-statement';
@@ -3260,7 +3656,7 @@ function renderForm() {
 
     const p6Card = document.createElement('article');
     p6Card.className = 'p1-card';
-    p6Card.innerHTML = '<h4>Q1. Full-Process Energy Consumption Assessment (Reaction + Separation)</h4>';
+    p6Card.innerHTML = '<h4>Question. Full-Process Energy Consumption Assessment (Reaction + Separation)</h4>';
 
     const p6OptionsWrap = document.createElement('div');
     p6OptionsWrap.className = 'p1-options';
@@ -3334,7 +3730,7 @@ function renderForm() {
 
     const p7Card = document.createElement('article');
     p7Card.className = 'p1-card';
-    p7Card.innerHTML = '<h4>Q1. Renewability of Core Feedstocks and Carbon-Footprint Delta Assessment</h4>';
+    p7Card.innerHTML = '<h4>Question. Renewability of Core Feedstocks and Carbon-Footprint Delta Assessment</h4>';
 
     const p7OptionsWrap = document.createElement('div');
     p7OptionsWrap.className = 'p1-options';
@@ -3408,7 +3804,7 @@ function renderForm() {
 
     const p8Card = document.createElement('article');
     p8Card.className = 'p1-card';
-    p8Card.innerHTML = '<h4>Q1. Temporary Derivatization and Protecting-Group Usage Assessment</h4>';
+    p8Card.innerHTML = '<h4>Question. Temporary Derivatization and Protecting-Group Usage Assessment</h4>';
 
     const p8OptionsWrap = document.createElement('div');
     p8OptionsWrap.className = 'p1-options';
@@ -3431,7 +3827,6 @@ function renderForm() {
       const titleText = document.createElement('span');
       titleText.textContent = `${option.label}:`;
       titleRow.appendChild(titleText);
-      titleRow.appendChild(createHelpTip(option.description));
 
       const statementRow = document.createElement('span');
       statementRow.className = 'p4-option-statement';
@@ -3482,7 +3877,7 @@ function renderForm() {
 
     const p9Card = document.createElement('article');
     p9Card.className = 'p1-card';
-    p9Card.innerHTML = '<h4>Q1. Catalytic System and Stoichiometric-Reagent Usage Assessment</h4>';
+    p9Card.innerHTML = '<h4>Question. Catalytic System and Stoichiometric-Reagent Usage Assessment</h4>';
 
     const p9OptionsWrap = document.createElement('div');
     p9OptionsWrap.className = 'p1-options';
@@ -3505,7 +3900,6 @@ function renderForm() {
       const titleText = document.createElement('span');
       titleText.textContent = `${option.label}:`;
       titleRow.appendChild(titleText);
-      titleRow.appendChild(createHelpTip(option.description));
 
       const statementRow = document.createElement('span');
       statementRow.className = 'p4-option-statement';
@@ -3556,7 +3950,7 @@ function renderForm() {
 
     const p10Card = document.createElement('article');
     p10Card.className = 'p1-card';
-    p10Card.innerHTML = '<h4>Q1. Environmental Fate and Degradability Assessment of the Target Molecule</h4>';
+    p10Card.innerHTML = '<h4>Question. Environmental Fate and Degradability Assessment of the Target Molecule</h4>';
 
     const p10OptionsWrap = document.createElement('div');
     p10OptionsWrap.className = 'p1-options';
@@ -3579,7 +3973,6 @@ function renderForm() {
       const titleText = document.createElement('span');
       titleText.textContent = `${option.label}:`;
       titleRow.appendChild(titleText);
-      titleRow.appendChild(createHelpTip(option.description));
 
       const statementRow = document.createElement('span');
       statementRow.className = 'p4-option-statement';
@@ -3630,7 +4023,7 @@ function renderForm() {
 
     const p11Card = document.createElement('article');
     p11Card.className = 'p1-card';
-    p11Card.innerHTML = '<h4>Q1. Real-Time Monitoring and Reaction-Feedback Control Assessment</h4>';
+    p11Card.innerHTML = '<h4>Question. Real-Time Monitoring and Reaction-Feedback Control Assessment</h4>';
 
     const p11OptionsWrap = document.createElement('div');
     p11OptionsWrap.className = 'p1-options';
@@ -3704,7 +4097,7 @@ function renderForm() {
 
     const p12Card = document.createElement('article');
     p12Card.className = 'p1-card';
-    p12Card.innerHTML = '<h4>Q1. Inherent Safety and Accident-Prevention Assessment by Safety-Control Hierarchy</h4>';
+    p12Card.innerHTML = '<h4>Question. Inherent Safety and Accident-Prevention Assessment by Safety-Control Hierarchy</h4>';
 
     const p12OptionsWrap = document.createElement('div');
     p12OptionsWrap.className = 'p1-options';
@@ -3727,7 +4120,6 @@ function renderForm() {
       const titleText = document.createElement('span');
       titleText.textContent = `${option.label}:`;
       titleRow.appendChild(titleText);
-      titleRow.appendChild(createHelpTip(option.description));
 
       const statementRow = document.createElement('span');
       statementRow.className = 'p4-option-statement';
@@ -4450,11 +4842,7 @@ function applyLoadedAssessmentResult(result) {
       usedBalancedDefaults = true;
     } else {
       state.principleWeights = loadedWeights.map((weight) => {
-        const parsed = Number(weight);
-        if (Number.isNaN(parsed)) {
-          return WEIGHT_MIN_STRICT;
-        }
-        return Math.max(WEIGHT_MIN_STRICT, Math.min(100, parsed));
+        return clampWeightToStrictRange(weight);
       });
     }
   } else {
@@ -4578,6 +4966,16 @@ function applyLoadedAssessmentResult(result) {
   }
   syncSafetyInputsFromState();
 
+  // Restore comparison snapshots if present in the saved file.
+  if (Array.isArray(saved.comparisonSnapshots) && saved.comparisonSnapshots.length > 0) {
+    state.comparisonSnapshots = saved.comparisonSnapshots.filter(
+      (s) => s && typeof s === 'object' && Array.isArray(s.values) && Array.isArray(s.weights)
+    );
+  } else {
+    state.comparisonSnapshots = [];
+  }
+  state.rejectedComparisonEntries = [];
+
   renderForm();
   refreshSummary();
 
@@ -4652,7 +5050,19 @@ async function createNewAssessmentFile() {
 
   setCurrentFilePath(null);
   lastSavedEl.textContent = 'Not saved yet';
-  setStatus('New draft ready. Use Save As to choose the only save file.');
+
+  // Provision a new file on disk so auto-save has a target immediately.
+  if (window.desktopAPI && typeof window.desktopAPI.createAssessmentFile === 'function') {
+    const newResult = await window.desktopAPI.createAssessmentFile(buildAssessmentPayload());
+    if (newResult && !newResult.error && newResult.filePath) {
+      setCurrentFilePath(newResult.filePath);
+      setLastSavedLabel(newResult.updatedAt, false);
+      setStatus('New assessment file created. Your work will be auto-saved.');
+      return;
+    }
+  }
+
+  setStatus('New draft ready. Use Save As to choose the save file.');
 }
 
 async function openComparisonFiles() {
@@ -4750,6 +5160,333 @@ async function exportReportPdf() {
   setStatus(`Report exported successfully (${exportedTime}).`);
 }
 
+function build300DpiPngFromCanvas(sourceCanvas) {
+  if (!sourceCanvas || typeof sourceCanvas.getContext !== 'function') {
+    return '';
+  }
+  const srcW = Number(sourceCanvas.width || 0);
+  const srcH = Number(sourceCanvas.height || 0);
+  if (srcW <= 0 || srcH <= 0) {
+    return '';
+  }
+
+  const cssRect = sourceCanvas.getBoundingClientRect();
+  const cssW = Math.max(1, Math.round(cssRect.width || srcW));
+  const cssH = Math.max(1, Math.round(cssRect.height || srcH));
+  const scale300 = 300 / 96;
+  const targetW = Math.max(srcW, Math.round(cssW * scale300));
+  const targetH = Math.max(srcH, Math.round(cssH * scale300));
+
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = targetW;
+  exportCanvas.height = targetH;
+  const exportCtx = exportCanvas.getContext('2d');
+  if (!exportCtx) {
+    return '';
+  }
+
+  exportCtx.imageSmoothingEnabled = true;
+  exportCtx.imageSmoothingQuality = 'high';
+  // White background before drawing so transparent areas export as white.
+  exportCtx.fillStyle = '#ffffff';
+  exportCtx.fillRect(0, 0, targetW, targetH);
+  exportCtx.drawImage(sourceCanvas, 0, 0, targetW, targetH);
+  const rawPng = exportCanvas.toDataURL('image/png');
+  return applyPngDpiMetadata(rawPng, 300);
+}
+
+function readUint32Be(bytes, offset) {
+  return ((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3];
+}
+
+function writeUint32Be(bytes, offset, value) {
+  const v = value >>> 0;
+  bytes[offset] = (v >>> 24) & 0xff;
+  bytes[offset + 1] = (v >>> 16) & 0xff;
+  bytes[offset + 2] = (v >>> 8) & 0xff;
+  bytes[offset + 3] = v & 0xff;
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buffer.length; i += 1) {
+    crc ^= buffer[i];
+    for (let j = 0; j < 8; j += 1) {
+      const mask = -(crc & 1);
+      crc = (crc >>> 1) ^ (0xedb88320 & mask);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function buildPngChunk(typeText, dataBytes) {
+  const type = new Uint8Array(4);
+  for (let i = 0; i < 4; i += 1) {
+    type[i] = typeText.charCodeAt(i);
+  }
+
+  const length = dataBytes.length;
+  const chunk = new Uint8Array(12 + length);
+  writeUint32Be(chunk, 0, length);
+  chunk.set(type, 4);
+  chunk.set(dataBytes, 8);
+
+  const crcInput = new Uint8Array(4 + length);
+  crcInput.set(type, 0);
+  crcInput.set(dataBytes, 4);
+  writeUint32Be(chunk, 8 + length, crc32(crcInput));
+  return chunk;
+}
+
+function applyPngDpiMetadata(dataUrl, dpi = 300) {
+  try {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) {
+      return dataUrl;
+    }
+
+    const base64 = dataUrl.slice('data:image/png;base64,'.length);
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+    for (let i = 0; i < pngSignature.length; i += 1) {
+      if (bytes[i] !== pngSignature[i]) {
+        return dataUrl;
+      }
+    }
+
+    const ppm = Math.max(1, Math.round((Number(dpi) || 300) / 0.0254));
+    const physData = new Uint8Array(9);
+    writeUint32Be(physData, 0, ppm);
+    writeUint32Be(physData, 4, ppm);
+    physData[8] = 1;
+    const physChunk = buildPngChunk('pHYs', physData);
+
+    const chunks = [];
+    chunks.push(bytes.slice(0, 8));
+
+    let offset = 8;
+    let insertedPhys = false;
+    while (offset + 8 <= bytes.length) {
+      const length = readUint32Be(bytes, offset);
+      const typeOffset = offset + 4;
+      const dataOffset = offset + 8;
+      const dataEnd = dataOffset + length;
+      const chunkEnd = dataEnd + 4;
+      if (chunkEnd > bytes.length) {
+        return dataUrl;
+      }
+
+      const type = String.fromCharCode(bytes[typeOffset], bytes[typeOffset + 1], bytes[typeOffset + 2], bytes[typeOffset + 3]);
+
+      if (type !== 'pHYs') {
+        chunks.push(bytes.slice(offset, chunkEnd));
+      }
+
+      if (type === 'IHDR' && !insertedPhys) {
+        chunks.push(physChunk);
+        insertedPhys = true;
+      }
+
+      offset = chunkEnd;
+      if (type === 'IEND') {
+        break;
+      }
+    }
+
+    const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const merged = new Uint8Array(total);
+    let cursor = 0;
+    chunks.forEach((chunk) => {
+      merged.set(chunk, cursor);
+      cursor += chunk.length;
+    });
+
+    let out = '';
+    for (let i = 0; i < merged.length; i += 1) {
+      out += String.fromCharCode(merged[i]);
+    }
+    return `data:image/png;base64,${btoa(out)}`;
+  } catch (_) {
+    return dataUrl;
+  }
+}
+
+function triggerDownloadDataUrl(dataUrl, fileName) {
+  if (!dataUrl) {
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = dataUrl;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+function getVisualizationExportName(canvas) {
+  if (canvas === radarCanvas) {
+    return 'radar-profile';
+  }
+  if (canvas === gaugeCanvas) {
+    return 'flower-profile';
+  }
+  if (canvas === flowerCanvas) {
+    return 'weighted-ring-profile';
+  }
+  if (canvas === compareRadarCanvasEl) {
+    return 'comparison-radar';
+  }
+  if (canvas === safetyDriverChartEl) {
+    return 'safety-driver-breakdown';
+  }
+  if (canvas === safetyStageRadarEl) {
+    return 'safety-stage-radar';
+  }
+  if (canvas === safetyScoreConfidenceMapEl) {
+    return 'safety-score-vs-confidence';
+  }
+  return 'visualization';
+}
+
+function ensureHoverVisualExportButton() {
+  let button = document.getElementById('hoverVisualExportBtn');
+  if (button) {
+    return button;
+  }
+
+  button = document.createElement('button');
+  button.id = 'hoverVisualExportBtn';
+  button.type = 'button';
+  button.textContent = '↓';
+  button.title = 'Download 300 DPI';
+  button.setAttribute('aria-label', 'Download 300 DPI');
+  button.style.position = 'fixed';
+  button.style.zIndex = '9999';
+  button.style.display = 'none';
+  button.style.width = '36px';
+  button.style.height = '36px';
+  button.style.padding = '0';
+  button.style.borderRadius = '999px';
+  button.style.border = '1px solid rgba(17, 24, 39, 0.35)';
+  button.style.background = 'rgba(255, 255, 255, 0.96)';
+  button.style.color = '#111111';
+  button.style.font = '900 19px "Segoe UI", sans-serif';
+  button.style.lineHeight = '34px';
+  button.style.textAlign = 'center';
+  button.style.cursor = 'pointer';
+  button.style.boxShadow = '0 8px 18px rgba(0, 0, 0, 0.18)';
+  button.style.backdropFilter = 'blur(2px)';
+
+  button.addEventListener('mouseenter', () => {
+    if (hoverExportHideTimer) {
+      clearTimeout(hoverExportHideTimer);
+      hoverExportHideTimer = null;
+    }
+  });
+
+  button.addEventListener('mouseleave', () => {
+    if (!activeHoverExportCanvas) {
+      button.style.display = 'none';
+    }
+  });
+
+  button.addEventListener('click', () => {
+    if (!activeHoverExportCanvas) {
+      return;
+    }
+    // Comparison radar gets legend baked in; all others use standard 300 DPI path.
+    const dataUrl = activeHoverExportCanvas === compareRadarCanvasEl
+      ? buildComparisonRadarWithLegend()
+      : build300DpiPngFromCanvas(activeHoverExportCanvas);
+    if (!dataUrl) {
+      setStatus('Current visualization is unavailable for export.');
+      return;
+    }
+    const timestamp = new Date().toISOString().replace(/[.:]/g, '-');
+    const name = getVisualizationExportName(activeHoverExportCanvas);
+    triggerDownloadDataUrl(dataUrl, `prime-${name}-300dpi-${timestamp}.png`);
+    setStatus(`Downloaded ${name} at 300 DPI.`);
+  });
+
+  document.body.appendChild(button);
+  return button;
+}
+
+function positionHoverVisualExportButton(canvas) {
+  const button = ensureHoverVisualExportButton();
+  const rect = canvas.getBoundingClientRect();
+  const margin = 10;
+  const btnRect = button.getBoundingClientRect();
+  const left = Math.max(margin, rect.right - (btnRect.width || 36) - margin);
+  const top = Math.max(margin, rect.top + margin);
+  button.style.left = `${Math.round(left)}px`;
+  button.style.top = `${Math.round(top)}px`;
+}
+
+function showHoverVisualExportButton(canvas) {
+  if (!canvas) {
+    return;
+  }
+  if (hoverExportHideTimer) {
+    clearTimeout(hoverExportHideTimer);
+    hoverExportHideTimer = null;
+  }
+  activeHoverExportCanvas = canvas;
+  const button = ensureHoverVisualExportButton();
+  button.style.display = 'block';
+  positionHoverVisualExportButton(canvas);
+}
+
+function scheduleHideHoverVisualExportButton() {
+  if (hoverExportHideTimer) {
+    clearTimeout(hoverExportHideTimer);
+  }
+  hoverExportHideTimer = setTimeout(() => {
+    const button = ensureHoverVisualExportButton();
+    button.style.display = 'none';
+    activeHoverExportCanvas = null;
+    hoverExportHideTimer = null;
+  }, 180);
+}
+
+function setupHoverVisualExportForCharts() {
+  const canvases = [
+    radarCanvas,
+    gaugeCanvas,
+    flowerCanvas,
+    compareRadarCanvasEl,
+    safetyDriverChartEl,
+    safetyStageRadarEl,
+    safetyScoreConfidenceMapEl
+  ].filter(Boolean);
+
+  canvases.forEach((canvas) => {
+    if (canvas.dataset.hoverExportBound === '1') {
+      return;
+    }
+    canvas.dataset.hoverExportBound = '1';
+    canvas.addEventListener('mouseenter', () => showHoverVisualExportButton(canvas));
+    canvas.addEventListener('mousemove', () => showHoverVisualExportButton(canvas));
+    canvas.addEventListener('mouseleave', () => scheduleHideHoverVisualExportButton());
+  });
+
+  window.addEventListener('scroll', () => {
+    if (activeHoverExportCanvas) {
+      positionHoverVisualExportButton(activeHoverExportCanvas);
+    }
+  }, { passive: true });
+
+  window.addEventListener('resize', () => {
+    if (activeHoverExportCanvas) {
+      positionHoverVisualExportButton(activeHoverExportCanvas);
+    }
+  });
+}
+
 if (newFileBtnEl) {
   newFileBtnEl.addEventListener('click', createNewAssessmentFile);
 }
@@ -4780,10 +5517,55 @@ renderForm();
 attachRecommendationHelpTips();
 attachSafetyFieldHelpTips();
 bindSafetyInputs();
+setupHoverVisualExportForCharts();
 refreshSummary();
 
 (async function init() {
+  // ── Disclaimer gate ──────────────────────────────────────────────
+  await new Promise((resolve) => {
+    const overlay  = document.getElementById('disclaimerOverlay');
+    const acceptBtn = document.getElementById('disclaimerAcceptBtn');
+    const declineBtn = document.getElementById('disclaimerDeclineBtn');
+    const checkbox  = document.getElementById('disclaimerCheck');
+
+    if (localStorage.getItem('primeDisclaimerAccepted') === '1') {
+      overlay.classList.add('hidden');
+      resolve();
+      return;
+    }
+
+    overlay.classList.remove('hidden');
+
+    checkbox.addEventListener('change', () => {
+      acceptBtn.disabled = !checkbox.checked;
+    });
+
+    acceptBtn.addEventListener('click', () => {
+      localStorage.setItem('primeDisclaimerAccepted', '1');
+      overlay.classList.add('hidden');
+      resolve();
+    });
+
+    declineBtn.addEventListener('click', () => {
+      if (window.desktopAPI && window.desktopAPI.closeApp) {
+        window.desktopAPI.closeApp();
+      } else {
+        window.close();
+      }
+    });
+  });
+  // ── end disclaimer gate ──────────────────────────────────────────
+
   await restoreViewPreference();
   setVisualizationView(activeView, { persist: false });
   await loadAssessment();
+
+  // If no prior file was found, auto-provision a new file on disk so that
+  // auto-save has a target and a refresh does not lose unsaved work.
+  if (!state.currentFilePath && window.desktopAPI && typeof window.desktopAPI.createAssessmentFile === 'function') {
+    const initResult = await window.desktopAPI.createAssessmentFile(buildAssessmentPayload());
+    if (initResult && !initResult.error && initResult.filePath) {
+      setCurrentFilePath(initResult.filePath);
+    }
+  }
 })();
